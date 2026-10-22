@@ -385,6 +385,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         }
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
         Command::SetClipboardImage(uri) => set_clipboard_image(surface, uri),
+        Command::SetClipboardImageBytes { bytes, mime } => set_clipboard_image_bytes(mime, bytes),
         Command::ReadClipboardImage { id, has_only } => {
             read_clipboard_image(surface, *id, *has_only)
         }
@@ -818,13 +819,19 @@ fn set_clipboard_image(surface: &Surface, uri: &str) {
         log::warn!("Clipboard.writeImage: `{uri}` names no image");
         return;
     };
+    set_clipboard_image_bytes(&mime, &bytes);
+}
+
+/// `Clipboard.writeImage` with a `Blob`'s bytes, under its type (and TIFF
+/// too, which every AppKit app reads).
+fn set_clipboard_image_bytes(mime: &str, bytes: &[u8]) {
     let Some((_, kind)) = IMAGE_TYPES.iter().find(|(m, _)| *m == mime) else {
         log::warn!("Clipboard.writeImage: unsupported image type {mime}");
         return;
     };
     let pasteboard = NSPasteboard::generalPasteboard();
     pasteboard.clearContents();
-    let data = NSData::with_bytes(&bytes);
+    let data = NSData::with_bytes(bytes);
     pasteboard.setData_forType(Some(&data), &NSString::from_str(kind));
     if *kind != "public.tiff"
         && let Some(tiff) =

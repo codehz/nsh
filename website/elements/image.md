@@ -59,7 +59,7 @@ The source (`src` and `placeholder`; `image(..)` and `.placeholder(..)` in Rust)
 | An asset | Rust `asset!("logo.png")`, TSX `import logo from "./logo.png"` | An `ImageAsset` `{ url, size, scales? }`, sized in points: a `@2x` file counts half its pixels. With `logo@2x.png` / `logo@3x.png` next to `logo.png`, the variant for the screen's pixel ratio is loaded ([pixel densities](../docs/images-and-assets.md#pixel-densities)). `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` and `.heic` can be imported, and `.svg`, sized by its `width` and `height` or `viewBox` ([SVG images](../docs/images-and-assets.md#svg-images)). |
 | A URL | `"https://example.com/a.jpg"` | Downloaded and cached. Downloads of the same URL are shared between views. |
 | An asset path | `"asset:/images/a.png"` | A file of the app's assets. |
-| A `blob:` URL | `URL.createObjectURL(blob)`, `Clipboard.readImage().url` | Bytes the app made or read, kept in the engine until the URL is revoked: never a `data:` URI, whatever their size. |
+| A `blob:` URL | `URL.createObjectURL(blob)`, such as a `Blob` from `Clipboard.readImageBlob()` | Bytes the app made or read, kept in the engine until the URL is revoked: never a `data:` URI, whatever their size. |
 | A `data:` URL | `"data:image/png;base64,…"` | The bytes the URI holds. |
 
 During development assets are served by the dev server; `nsh build` and `nsh package` copy them into the app (a Rust

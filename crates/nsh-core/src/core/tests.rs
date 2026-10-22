@@ -7216,8 +7216,116 @@ mod components {
         let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("pasted t")));
         assert_eq!(
             shown.last().unwrap(),
-            &format!("pasted true Some(\"4x3 {url}\") file:///tmp/a%20b.png,file:///tmp/c/")
+            "pasted true Some(\"4x3 data:image/png;base64,iVBORw==\") file:///tmp/a%20b.png,file:///tmp/c/"
         );
+        assert!(!store.has(&url), "the blob is freed after the data URI");
+    }
+
+    /// Pastes the clipboard's image bytes when pressed.
+    #[component]
+    fn ImageBlobPaster() -> impl IntoElement {
+        let pasted = signal(String::new());
+        view()
+            .child(text(move || format!("pasted {}", pasted.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                spawn(async move {
+                    let image = clipboard_image_bytes().await;
+                    pasted.set(match image {
+                        Some(image) => format!(
+                            "{}x{} {} {:?}",
+                            image.size.width.0,
+                            image.size.height.0,
+                            image.mime,
+                            &image.bytes[..]
+                        ),
+                        None => "none".to_owned(),
+                    });
+                });
+            }))
+    }
+
+    #[test]
+    fn components_read_clipboard_image_bytes() {
+        let store = crate::blob::BlobStore::default();
+        let mut c = core();
+        c.set_blobs(store.clone());
+        c.mount_root(&crate::ui::Root::new::<ImageBlobPaster>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let command = c
+            .commit()
+            .unwrap()
+            .items
+            .into_iter()
+            .find_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: command @ Command::ReadClipboardImage { .. },
+                } => Some(command),
+                _ => None,
+            })
+            .expect("the read");
+        let Command::ReadClipboardImage { id, .. } = command else {
+            unreachable!()
+        };
+        let url = store.put(vec![0x89, b'P', b'N', b'G'], "image/png");
+        let payload = EventPayload::Map(vec![
+            ("id", crate::PayloadValue::Number(id as f64)),
+            ("has", crate::PayloadValue::Bool(true)),
+            ("uri", crate::PayloadValue::Str(url.clone())),
+            ("width", crate::PayloadValue::Number(4.0)),
+            ("height", crate::PayloadValue::Number(3.0)),
+        ]);
+        assert!(c.component_event(ROOT_ID, EventKind::Clipboard, &payload));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("pasted 4x3")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "pasted 4x3 image/png [137, 80, 78, 71]"
+        );
+        assert!(!store.has(&url), "the blob is freed after the answer");
+
+        // A platform (the web's player) may answer a `data:` URI: the bytes
+        // are decoded for `readImageBlob`.
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let command = c
+            .commit()
+            .unwrap()
+            .items
+            .into_iter()
+            .find_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: command @ Command::ReadClipboardImage { .. },
+                } => Some(command),
+                _ => None,
+            })
+            .expect("the read");
+        let Command::ReadClipboardImage { id, .. } = command else {
+            unreachable!()
+        };
+        let payload = EventPayload::Map(vec![
+            ("id", crate::PayloadValue::Number(id as f64)),
+            ("has", crate::PayloadValue::Bool(true)),
+            (
+                "uri",
+                crate::PayloadValue::Str("data:image/gif;base64,AQID".into()),
+            ),
+            ("width", crate::PayloadValue::Number(2.0)),
+            ("height", crate::PayloadValue::Number(2.0)),
+        ]);
+        assert!(c.component_event(ROOT_ID, EventKind::Clipboard, &payload));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("pasted 2x2")));
+        assert_eq!(shown.last().unwrap(), "pasted 2x2 image/gif [1, 2, 3]");
     }
 
     /// A clipboard image whose bytes do not fit the limit is left out, and

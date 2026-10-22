@@ -19,7 +19,14 @@ function App() {
           Clipboard.writeImage(
             "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
           );
-          const reads = [Clipboard.readText(), Clipboard.hasText(), Clipboard.readImage(), Clipboard.hasImage(), Clipboard.readFiles()];
+          const reads = [
+            Clipboard.readText(),
+            Clipboard.hasText(),
+            Clipboard.readImage(),
+            Clipboard.readImageBlob(),
+            Clipboard.hasImage(),
+            Clipboard.readFiles(),
+          ];
           for (const read of reads) read.catch((e) => failed.set(String(e)));
           calls.set(`${reads.filter((r) => typeof r.then === "function").length} promises`);
         }}

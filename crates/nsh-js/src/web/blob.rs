@@ -5,7 +5,7 @@
 
 use std::{
     hash::{BuildHasher, Hasher},
-    rc::Rc,
+    sync::Arc,
 };
 
 use super::{
@@ -18,7 +18,7 @@ use super::{
 /// A blob's bytes and type.
 #[derive(Clone)]
 pub(crate) struct Blob {
-    bytes: Rc<[u8]>,
+    bytes: Arc<[u8]>,
     start: usize,
     end: usize,
     pub(crate) mime: String,
@@ -43,8 +43,29 @@ impl Blob {
         }
     }
 
+    /// A blob of bytes shared with their owner (the engine's store).
+    pub(crate) fn from_shared(bytes: Arc<[u8]>, mime: String) -> Blob {
+        let end = bytes.len();
+        Blob {
+            bytes,
+            start: 0,
+            end,
+            mime,
+        }
+    }
+
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes[self.start..self.end]
+    }
+
+    /// The whole buffer when this blob is not a slice, else a copy of the
+    /// slice.
+    pub(crate) fn to_shared(&self) -> Arc<[u8]> {
+        if self.start == 0 && self.end == self.bytes.len() {
+            self.bytes.clone()
+        } else {
+            Arc::from(self.bytes())
+        }
     }
 
     fn len(&self) -> usize {
@@ -325,9 +346,7 @@ native!(
     fn create_object_url(cx, this, args) {
         let b = blob_of(cx, args.get(0))?
             .ok_or_else(|| js::type_error(cx, "createObjectURL needs a Blob"))?;
-        let url = super::web(cx)
-            .blobs
-            .put(b.bytes().to_vec(), b.mime.clone());
+        let url = super::web(cx).blobs.put(b.to_shared(), b.mime.clone());
         js::string(cx, &url)
     }
 );

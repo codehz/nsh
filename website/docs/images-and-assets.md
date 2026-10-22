@@ -135,8 +135,8 @@ image(move || user.with(|u| u.avatar_url.clone()))
 
 ## Blob URLs
 
-A source may be a `blob:` URL: the bytes `URL.createObjectURL(blob)` stored in the engine, a clipboard image's `url`
-([`Clipboard.readImage`](../modules/nsh-clipboard.md#clipboardreadimage)), or one an app made. The platform reads them
+A source may be a `blob:` URL: the bytes `URL.createObjectURL(blob)` stored in the engine, one made from a clipboard
+image's `Blob` ([`Clipboard.readImageBlob`](../modules/nsh-clipboard.md#clipboardreadimageblob)), or one an app made. The platform reads them
 from the engine's store, so a picture needs no `data:` URI — no base64 step and no second copy, whatever its size.
 `src` and `placeholder`, `Image.getSize` and `Image.prefetch`, a canvas's `drawImage` and `Clipboard.writeImage` all
 take them, and `fetch` reads their bytes too. A revoked URL loads nothing. They are not assets: nothing is packaged,

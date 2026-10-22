@@ -3432,7 +3432,7 @@ class Player {
       case "seek": if (el?._video) el._video.currentTime = args[0]; break;
       case "setClipboard": this.writeClipboard(args[0]); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
-      case "setClipboardImage": this.writeClipboardImage(args[0]); break;
+      case "setClipboardImage": this.writeClipboardImage(args[0], args[1]); break;
       case "readClipboardImage": this.readClipboardImage(args[0], args[1]); break;
       // Pages see no local paths: never any files.
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
@@ -3504,8 +3504,9 @@ class Player {
   }
 
   /** `Clipboard.writeImage`: the image of a `blob:` URL (in the engine's
-   * store) or a `data:` URI as a clipboard item (browsers take PNG). */
-  async writeClipboardImage(uri) {
+   * store) or a `data:` URI as a clipboard item (browsers take PNG). A Blob
+   * the engine stored for this write (`owned`) is released afterwards. */
+  async writeClipboardImage(uri, owned = false) {
     try {
       const src = this.asset(uri);
       if (!src) return;
@@ -3513,6 +3514,21 @@ class Player {
       await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
     } catch {
       // Denied, an insecure context, or a type the browser does not write.
+    } finally {
+      if (owned) this.releaseBlob(uri);
+    }
+  }
+
+  /** Drops a `blob:` URL's browser blob and its bytes in the engine
+   * (`Clipboard.writeImage` with a Blob). */
+  releaseBlob(uri) {
+    const url = this.blobUrls.get(uri);
+    if (url) {
+      URL.revokeObjectURL(url);
+      this.blobUrls.delete(uri);
+    }
+    if (typeof this.wasm?.nsh_blob_remove === "function") {
+      this.withStrings([uri], (p, l) => this.wasm.nsh_blob_remove(p, l));
     }
   }
 
@@ -3520,7 +3536,11 @@ class Player {
    * URL (in the engine's store) with its size. */
   async readClipboardImage(request, hasOnly) {
     const app = this.app;
-    const answer = (payload) => app === this.app && this.event(ROOT_ID, "onClipboard", { id: request, ...payload });
+    const answer = (payload) => {
+      if (app !== this.app) return false;
+      this.event(ROOT_ID, "onClipboard", { id: request, ...payload });
+      return true;
+    };
     let blob = null;
     try {
       for (const item of (await navigator.clipboard?.read()) ?? []) {
@@ -3535,11 +3555,20 @@ class Player {
     }
     if (!blob || hasOnly) return answer({ has: !!blob });
     const uri = this.putBlob(new Uint8Array(await blob.arrayBuffer()), blob.type);
-    const src = uri ? this.asset(uri) : "";
-    if (!src) return answer({ has: true });
+    if (!uri) return answer({ has: true });
+    // Measure the browser's own blob: the engine's store keeps the bytes
+    // (the core frees them after the answer), and this URL is revoked at once.
+    const src = URL.createObjectURL(blob);
     const img = new Image();
-    img.onload = () => answer({ has: true, uri, width: img.naturalWidth, height: img.naturalHeight });
-    img.onerror = () => answer({ has: true });
+    const done = (payload) => {
+      URL.revokeObjectURL(src);
+      if (!answer(payload)) this.releaseBlob(uri);
+    };
+    img.onload = () => done({ has: true, uri, width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => {
+      this.releaseBlob(uri);
+      done({ has: true });
+    };
     img.src = src;
   }
 

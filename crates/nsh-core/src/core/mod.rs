@@ -1351,6 +1351,7 @@ impl<M: TextEngine> Core<M> {
                 Command::SetClipboard(_)
                 | Command::ReadClipboard { .. }
                 | Command::SetClipboardImage(_)
+                | Command::SetClipboardImageBytes { .. }
                 | Command::ReadClipboardImage { .. }
                 | Command::ReadClipboardFiles { .. }
                     if !self.access.allows_clipboard() =>
@@ -1369,6 +1370,7 @@ impl<M: TextEngine> Core<M> {
                 Command::SetClipboard(_)
                 | Command::ReadClipboard { .. }
                 | Command::SetClipboardImage(_)
+                | Command::SetClipboardImageBytes { .. }
                 | Command::ReadClipboardImage { .. }
                 | Command::ReadClipboardFiles { .. }
                     if self.clipboard.is_some() =>
@@ -1376,7 +1378,9 @@ impl<M: TextEngine> Core<M> {
                     let clipboard = self.clipboard.clone().expect("a clipboard");
                     match &command {
                         Command::SetClipboard(text) => clipboard.set_text(Some(text.clone())),
-                        Command::SetClipboardImage(_) => clipboard.set_text(None),
+                        Command::SetClipboardImage(_) | Command::SetClipboardImageBytes { .. } => {
+                            clipboard.set_text(None)
+                        }
                         Command::ReadClipboard {
                             id: request,
                             has_only,

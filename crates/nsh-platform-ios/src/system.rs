@@ -298,6 +298,12 @@ pub(crate) fn set_clipboard_image(blobs: &nsh_core::blob::BlobStore, uri: &str) 
         log::warn!("Clipboard.writeImage: `{uri}` names no image");
         return;
     };
+    set_clipboard_image_bytes(&mime, &bytes);
+}
+
+/// `Clipboard.writeImage` with a `Blob`'s bytes on the general pasteboard,
+/// under its type.
+pub(crate) fn set_clipboard_image_bytes(mime: &str, bytes: &[u8]) {
     let kind = match IMAGE_TYPES.iter().find(|(m, _)| *m == mime) {
         Some((_, kind)) => *kind,
         None if mime.starts_with("image/") => "public.image",
@@ -307,7 +313,7 @@ pub(crate) fn set_clipboard_image(blobs: &nsh_core::blob::BlobStore, uri: &str) 
         }
     };
     let board = objc2_ui_kit::UIPasteboard::generalPasteboard();
-    board.setData_forPasteboardType(&NSData::with_bytes(&bytes), &NSString::from_str(kind));
+    board.setData_forPasteboardType(&NSData::with_bytes(bytes), &NSString::from_str(kind));
 }
 
 /// `Clipboard.readImage` / `hasImage`: the answer to read `id`. `hasImages`

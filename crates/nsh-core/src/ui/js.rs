@@ -8,7 +8,7 @@
 //! borrowed for a call, a [`JsOwned`] one Rust holds a reference to (freed
 //! when dropped).
 
-use std::{fmt, rc::Rc};
+use std::{fmt, rc::Rc, sync::Arc};
 
 use super::{PropError, callback::CallbackHandle, class::ClassInstance};
 use crate::JsonValue;
@@ -65,6 +65,12 @@ pub trait JsHost {
     fn string(&self, v: JsRaw) -> Option<String>;
     /// The bytes of `Uint8Array` `v`, copied (`None`: not one).
     fn bytes(&self, v: JsRaw) -> Option<Vec<u8>>;
+    /// The bytes and type of `Blob` `v` (`None`: not one); the bytes are
+    /// shared when `v` is a whole blob, copied when it is a slice.
+    fn blob(&self, v: JsRaw) -> Option<(Arc<[u8]>, String)> {
+        let _ = v;
+        None
+    }
     /// The length of array `v` (`None`: not an array; an error when it is
     /// more than the host reads in one call).
     fn len(&self, v: JsRaw) -> Result<Option<usize>, PropError>;
@@ -108,6 +114,11 @@ pub trait JsHost {
     fn new_string(&self, s: &str) -> Result<JsRaw, PropError>;
     /// A `Uint8Array` of `bytes` (copied).
     fn new_bytes(&self, bytes: &[u8]) -> Result<JsRaw, PropError>;
+    /// A `Blob` of `bytes` of type `mime`; the bytes are shared.
+    fn new_blob(&self, bytes: Arc<[u8]>, mime: &str) -> Result<JsRaw, PropError> {
+        let _ = (bytes, mime);
+        Err(PropError("a Blob is not available here".into()))
+    }
     /// A `Date` of `millis` since the Unix epoch.
     fn new_date(&self, millis: f64) -> Result<JsRaw, PropError>;
     /// An array of `items` (taken).
@@ -192,6 +203,12 @@ impl<'a> JsIn<'a> {
     /// The bytes of a `Uint8Array`, copied.
     pub fn as_bytes(&self) -> Option<Vec<u8>> {
         self.host.bytes(self.raw)
+    }
+
+    /// The bytes and type of a `Blob` (shared when it is whole, copied when
+    /// it is a slice).
+    pub fn as_blob(&self) -> Option<(Arc<[u8]>, String)> {
+        self.host.blob(self.raw)
     }
 
     /// `undefined` or `null`.

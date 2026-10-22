@@ -469,6 +469,15 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 _ => log::warn!("Clipboard.writeImage: Windows takes a PNG blob: or data: URL"),
             }
         }
+        Command::SetClipboardImageBytes { bytes, mime } => {
+            if mime == "image/png" {
+                if !set_clipboard_bytes(png_format(), bytes) {
+                    log::debug!("windows: cannot set the clipboard");
+                }
+            } else {
+                log::warn!("Clipboard.writeImage: Windows takes a PNG Blob");
+            }
+        }
         Command::ReadClipboardImage { id, has_only } => {
             let has = clipboard_has_image();
             let bytes = (has && !*has_only).then(clipboard_image).flatten();

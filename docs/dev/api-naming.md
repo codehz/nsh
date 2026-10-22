@@ -210,8 +210,8 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `BackHandler.addEventListener("hardwareBackPress", l)` → `{ remove() }` | `BackHandler.onBackPress(l)` → `() => void` | Listening | Removed with the component it was added in; `l` returns `true` when it handled the press. As `NavPage`'s `onBackPress` |
 | **`nsh/clipboard`** | | | |
 | `getString`, `setString`, `hasString` | `readText()`, `writeText(text): Promise<void>`, `hasText()` | Where names come from | The DOM's `navigator.clipboard`; GPUI's `read_from_clipboard` / `write_to_clipboard` |
-| `getImage`, `setImage`, `hasImage`, `getFiles` | `readImage()`, `writeImage(src)`, `hasImage()`, `readFiles()` | Where names come from | |
-| `ClipboardImage.uri` | `ClipboardImage.url` | Addresses | |
+| `getImage`, `setImage`, `hasImage`, `getFiles` | `readImage()`, `readImageBlob()`, `writeImage(src: string \| Blob)`, `hasImage()`, `readFiles()` | Where names come from | `readImageBlob` names the bytes a `readImage` URL would encode |
+| `ClipboardImage.uri` | `ClipboardImage.url` | Addresses | A base64 `data:` URI; `ClipboardImageBlob` carries the `Blob` and `size` |
 | **`nsh/storage`** | | | |
 | `Storage.getAllKeys()` | `Storage.keys()` | Where names come from | `getItem` / `setItem` / `removeItem` / `clear` are the DOM's `Storage`'s |
 | **Styles** | | | |

@@ -10,7 +10,7 @@ The clipboard API reads and writes the system clipboard: text everywhere (`UIPas
 
 ```rust tabs
 use nsh_core::ui::prelude::*; // set_clipboard, clipboard_string, clipboard_image, ...
-use nsh_core::ui::ClipboardImage;
+use nsh_core::ui::{ClipboardImage, ClipboardImageBytes};
 ```
 
 ```tsx tabs
@@ -22,14 +22,20 @@ const Clipboard: {
   writeText(text: string): Promise<void>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
-  writeImage(src: string): Promise<void>;
+  writeImage(src: string | Blob): Promise<void>;
   readImage(): Promise<ClipboardImage | null>;
+  readImageBlob(): Promise<ClipboardImageBlob | null>;
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
 
 interface ClipboardImage {
-  url: string; // blob:nsh://app/…
+  url: string; // data:image/…;base64,…
+  size: { width: number; height: number }; // pixels
+}
+
+interface ClipboardImageBlob {
+  blob: Blob;
   size: { width: number; height: number }; // pixels
 }
 ```
@@ -39,12 +45,13 @@ interface ClipboardImage {
 | `await Clipboard.writeText(text)` | `set_clipboard(text)` |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
-| `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
+| `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` or `set_clipboard_image_bytes(bytes, mime)` |
 | `await Clipboard.readImage()` | `clipboard_image().await -> Option<ClipboardImage>` |
+| `await Clipboard.readImageBlob()` | `clipboard_image_bytes().await -> Option<ClipboardImageBytes>` |
 | `await Clipboard.hasImage()` | `clipboard_has_image().await -> bool` |
 | `await Clipboard.readFiles()` | `clipboard_files().await -> Vec<String>` |
 
-The Rust reads return answers to await in a task (`spawn`, or an `async` module function); `ClipboardImage` is `nsh_core::ui::ClipboardImage`, with `url` and `size` (a `Size<DevicePixels>`).
+The Rust reads return answers to await in a task (`spawn`, or an `async` module function); `ClipboardImage` is `nsh_core::ui::ClipboardImage`, with `url` (a `data:` URI) and `size` (a `Size<DevicePixels>`). `ClipboardImageBytes` has the encoded `bytes`, their `mime`, and `size`; TSX sees them as a `ClipboardImageBlob` (`{ blob, size }`).
 
 The user can also copy from a [selectable text](../elements/text.md) themselves; the clipboard API is for copying from code, such as a Copy button.
 
@@ -134,13 +141,13 @@ readImage(): Promise<ClipboardImage | null>;
 ```
 
 Resolves with the clipboard's image, or `null` when it holds none: a pasted screenshot, or an image copied in a browser
-or an image editor. Rust: `clipboard_image()`, `None` when it holds none. `url` is a `blob:` URL of the image (PNG, or
-the clipboard's own JPEG, GIF, WebP or BMP), which an [`Image`](../elements/image.md) shows as its `src`; in TSX,
-`fetch(url)` gives its bytes, for an upload, and in Rust `blob_bytes(url.clone()).await` does. Its bytes stay in the
-engine's store, where the URL names them: nothing is base64-encoded and no second copy is kept in the VM's heap. `size`
-(`width` and `height`) is its size in pixels. As with `readText`, read it when the user asks to paste. Images of up to
-48 MB are read; for a larger one `readImage` resolves `null` and `hasImage` `true`. The URL lives until the app
-revokes it with `URL.revokeObjectURL`, or is replaced.
+or an image editor. Rust: `clipboard_image()`, `None` when it holds none. `url` is a base64 `data:` URI of the image
+(PNG, or the clipboard's own JPEG, GIF, WebP or BMP), which an [`Image`](../elements/image.md) shows as its `src`; in
+TSX `fetch(url)` gives its bytes. It owns its bytes: nothing has to be revoked. `size` (`width` and `height`) is its
+size in pixels. As with `readText`, read it when the user asks to paste. Images of up to 48 MB are read; for a larger
+one `readImage` resolves `null` and `hasImage` `true`.
+
+For the bytes without the base64 string (an upload, a large image), use [`readImageBlob`](#clipboardreadimageblob).
 
 ```rust tabs
 use nsh_core::ui::{ClipboardImage, prelude::*};
@@ -165,13 +172,6 @@ fn attachments() -> impl IntoElement {
         ))
 }
 
-async fn upload(image: &ClipboardImage) -> Result<HttpResponse, String> {
-    let bytes = blob_bytes(image.url.clone())
-        .await
-        .ok_or("the image's blob was revoked")?;
-    let request = HttpRequest::post("https://example.com/upload", bytes).header("Content-Type", "image/png");
-    fetch(request).await
-}
 ```
 
 ```tsx tabs
@@ -183,12 +183,6 @@ const attachments = signal<ClipboardImage[]>([]);
 async function paste() {
   const image = await Clipboard.readImage();
   if (image) attachments.set([...attachments(), image]);
-}
-
-async function upload(image: ClipboardImage) {
-  const body = new FormData();
-  body.append("file", await (await fetch(image.url)).blob(), "screenshot.png");
-  await fetch("https://example.com/upload", { method: "POST", body });
 }
 
 <View class="flex-row gap-2">
@@ -224,6 +218,41 @@ keymap.bind("mod+v", async () => {
 }, { when: "always" });
 ```
 
+## Clipboard.readImageBlob
+
+```ts
+readImageBlob(): Promise<ClipboardImageBlob | null>;
+```
+
+Resolves with the clipboard's image as bytes, or `null` when it holds none: `blob` is a `Blob` of the image's MIME type
+(PNG, or the clipboard's own JPEG, GIF, WebP or BMP), and `size` (`width` and `height`) is its size in pixels. Rust:
+`clipboard_image_bytes()`, with `bytes`, `mime` and `size`. No base64 string is made and there is no URL to revoke; a
+`Blob` owns its bytes. Images of up to 48 MB are read; for a larger one it resolves `null` and `hasImage` `true`. As
+with `readText`, read it when the user asks to paste. To show the image, `URL.createObjectURL(image.blob)` and revoke
+that URL when the view goes.
+
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+async fn upload_clipboard_image() -> Result<HttpResponse, String> {
+    let image = clipboard_image_bytes().await.ok_or("no clipboard image")?;
+    let request = HttpRequest::post("https://example.com/upload", image.bytes.to_vec())
+        .header("Content-Type", image.mime);
+    fetch(request).await
+}
+```
+
+```tsx tabs
+import { Clipboard } from "nsh/clipboard";
+
+const image = await Clipboard.readImageBlob();
+if (image) {
+  const body = new FormData();
+  body.append("file", image.blob, "screenshot.png");
+  await fetch("https://example.com/upload", { method: "POST", body });
+}
+```
+
 ## Clipboard.hasImage
 
 ```ts
@@ -236,19 +265,23 @@ Resolves with whether the clipboard holds an image, without reading it: no paste
 ## Clipboard.writeImage
 
 ```ts
-writeImage(src: string): Promise<void>;
+writeImage(src: string | Blob): Promise<void>;
 ```
 
-Puts the image of `src` on the clipboard, replacing what it holds: a `blob:` URL (such as `readImage` gives, or one
-`URL.createObjectURL` made) or a base64 `data:` URL. Rust: `set_clipboard_image(src)`. On Windows it takes a PNG, the
-format browsers, Office and the Snipping Tool read.
+Puts the image of `src` on the clipboard, replacing what it holds: a `blob:` URL, a base64 `data:` URL (as
+`readImage` gives), or a `Blob` (as `readImageBlob` gives). A `Blob`'s bytes decide its type: they are sniffed, so a
+`Blob` whose `type` is empty or differs still writes what it holds; bytes that are no image write nothing. Rust:
+`set_clipboard_image(src)` for a URL, `set_clipboard_image_bytes(bytes, mime)` for bytes. On Windows it takes a PNG,
+the format browsers, Office and the Snipping Tool read.
 
 ```rust tabs
 set_clipboard_image(image.url.clone());
+// Or the bytes: set_clipboard_image_bytes(image.bytes, image.mime);
 ```
 
 ```tsx tabs
 await Clipboard.writeImage(image.url);
+// Or: await Clipboard.writeImage(image.blob);
 ```
 
 ## Clipboard.readFiles
@@ -275,4 +308,4 @@ const names = files.map((url) => decodeURIComponent(new URL(url).pathname.split(
 ```
 
 > [!NOTE]
-> When your app declares `capabilities` in `nsh.json`, the clipboard must be granted with `"clipboard": true`. Without it `writeText` and `writeImage` do nothing, `readText` resolves `""`, `readImage` `null`, `readFiles` `[]` and `hasText` and `hasImage` `false`, from Rust and TSX alike. See [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
+> When your app declares `capabilities` in `nsh.json`, the clipboard must be granted with `"clipboard": true`. Without it `writeText` and `writeImage` do nothing, `readText` resolves `""`, `readImage` and `readImageBlob` `null`, `readFiles` `[]` and `hasText` and `hasImage` `false`, from Rust and TSX alike. See [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).

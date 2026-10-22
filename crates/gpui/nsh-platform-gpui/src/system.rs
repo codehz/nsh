@@ -930,6 +930,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             let blobs = surface.blobs.borrow().clone();
             set_clipboard_image(&blobs, uri);
         }
+        Command::SetClipboardImageBytes { bytes, mime } => set_clipboard_image_bytes(mime, bytes),
         Command::ReadClipboardImage { id, has_only } => {
             read_clipboard_image(surface.key(), *id, *has_only)
         }
@@ -996,11 +997,17 @@ fn set_clipboard_image(blobs: &nsh_core::blob::BlobStore, uri: &str) {
         log::warn!("Clipboard.writeImage: `{uri}` names no image");
         return;
     };
-    let Some(format) = gpui::ImageFormat::from_mime_type(&mime) else {
+    set_clipboard_image_bytes(&mime, &bytes);
+}
+
+/// `Clipboard.writeImage` with a `Blob`'s bytes, in GPUI's format when it
+/// knows it.
+fn set_clipboard_image_bytes(mime: &str, bytes: &[u8]) {
+    let Some(format) = gpui::ImageFormat::from_mime_type(mime) else {
         log::warn!("Clipboard.writeImage: unsupported image type {mime}");
         return;
     };
-    let image = gpui::Image::from_bytes(format, bytes);
+    let image = gpui::Image::from_bytes(format, bytes.to_vec());
     crate::rt::on_app(move |cx| cx.write_to_clipboard(gpui::ClipboardItem::new_image(&image)));
 }
 

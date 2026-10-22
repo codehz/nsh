@@ -497,6 +497,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         }
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
         Command::SetClipboardImage(uri) => set_clipboard_image(surface, uri),
+        Command::SetClipboardImageBytes { bytes, .. } => set_clipboard_image_bytes(bytes),
         Command::ReadClipboardImage { id, has_only } => {
             read_clipboard_image(surface, *id, *has_only)
         }
@@ -1089,7 +1090,12 @@ fn set_clipboard_image(surface: &Surface, uri: &str) {
         log::warn!("Clipboard.writeImage: `{uri}` names no image");
         return;
     };
-    match gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)) {
+    set_clipboard_image_bytes(&bytes);
+}
+
+/// `Clipboard.writeImage` with a `Blob`'s bytes, as a GDK texture.
+fn set_clipboard_image_bytes(bytes: &[u8]) {
+    match gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes.to_vec())) {
         Ok(texture) => {
             if let Some(display) = gdk::Display::default() {
                 display.clipboard().set_texture(&texture);

@@ -33,6 +33,7 @@ use std::{
     cell::{Cell, RefCell},
     ffi::{CString, c_int, c_void},
     rc::Rc,
+    sync::Arc,
 };
 
 use nsh_core::{
@@ -1022,6 +1023,16 @@ impl JsHost for CallHost<'_> {
 
     fn new_bytes(&self, bytes: &[u8]) -> Result<JsRaw, PropError> {
         self.checked(js::uint8_array(self.cx, bytes))
+    }
+
+    fn blob(&self, v: JsRaw) -> Option<(Arc<[u8]>, String)> {
+        let blob = web::blob::blob_of(self.cx, from_raw(v)).ok()??;
+        Some((blob.to_shared(), blob.mime))
+    }
+
+    fn new_blob(&self, bytes: Arc<[u8]>, mime: &str) -> Result<JsRaw, PropError> {
+        let blob = web::blob::Blob::from_shared(bytes, mime.to_owned());
+        self.checked(web::blob::new_blob(self.cx, blob))
     }
 
     fn new_date(&self, millis: f64) -> Result<JsRaw, PropError> {

@@ -1017,6 +1017,10 @@ fn clipboard_images_and_files_reach_js() {
                     board = Some(uri.clone());
                     None
                 }
+                Command::SetClipboardImageBytes { bytes, mime } => {
+                    board = Some(nsh_core::platform::clipboard::data_uri(mime, bytes));
+                    None
+                }
                 Command::ReadClipboardImage { id, has_only } => {
                     let mut payload = vec![
                         ("id", PayloadValue::Number(*id as f64)),
@@ -1063,6 +1067,79 @@ fn clipboard_images_and_files_reach_js() {
             },
             Command::ReadClipboardFiles { id: 3 },
         ]
+    );
+}
+
+const CLIPBOARD_BLOB: &str = r#"import { mount, signal, Text } from "nsh";
+import { Clipboard } from "nsh/clipboard";
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  const png = new Uint8Array(await (await fetch(
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+  )).arrayBuffer());
+  const sliced = new Blob([new Uint8Array([9, 9]), png]).slice(2);
+  await Clipboard.writeImage(sliced);
+  const image = (await Clipboard.readImageBlob())!;
+  const bytes = new Uint8Array(await image.blob.arrayBuffer());
+  const legacy = (await Clipboard.readImage())!;
+  shown.set(`${image.blob.type} ${image.size.width}x${image.size.height} ${bytes.length} ${bytes[0]},${bytes[1]} ${legacy.url.startsWith("data:image/png")}`);
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn clipboard_blobs_round_trip_without_the_slice() {
+    let (engine, rx) = start(CLIPBOARD_BLOB);
+    let control = engine.control();
+    let mut board: Option<String> = None;
+    let mut commands = Vec::new();
+    until(&rx, |batch| {
+        for item in &batch.items {
+            let MountItem::Command {
+                id: ROOT_ID,
+                command,
+            } = item
+            else {
+                continue;
+            };
+            let payload = match command {
+                Command::SetClipboardImageBytes { bytes, mime } => {
+                    board = Some(nsh_core::platform::clipboard::data_uri(mime, bytes));
+                    None
+                }
+                Command::ReadClipboardImage { id, has_only } => {
+                    let mut payload = vec![
+                        ("id", PayloadValue::Number(*id as f64)),
+                        ("has", PayloadValue::Bool(board.is_some())),
+                    ];
+                    if let (false, Some(uri)) = (has_only, &board) {
+                        payload.push(("uri", PayloadValue::Str(uri.clone())));
+                        payload.push(("width", PayloadValue::Number(2.0)));
+                        payload.push(("height", PayloadValue::Number(1.0)));
+                    }
+                    Some(payload)
+                }
+                _ => continue,
+            };
+            if let Some(payload) = payload {
+                control.dispatch_event(ROOT_ID, EventKind::Clipboard, EventPayload::Map(payload));
+            }
+            commands.push(command.clone());
+        }
+        shows(batch, "image/png 2x1 70 137,80 true")
+    });
+    assert!(matches!(
+        commands.first(),
+        Some(Command::SetClipboardImageBytes { mime, .. }) if mime == "image/png"
+    ));
+    assert_eq!(
+        commands
+            .iter()
+            .filter(|c| matches!(c, Command::ReadClipboardImage { .. }))
+            .count(),
+        2
     );
 }
 

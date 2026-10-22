@@ -34,7 +34,7 @@ interface ImageSize {
 }
 ```
 
-Loads the image and resolves with its size in pixels (of the source image, not a downsampled copy; an SVG's intrinsic size in points, [on the web as the browser measures it](../docs/images-and-assets.md#svg-images)). An imported image with [pixel-density variants](../docs/images-and-assets.md#pixel-densities) loads the variant the views load on this screen and resolves with the imported file's size, whichever variant it loaded (an `<Image>` showing it reports the loaded variant's pixels in `onLoad`). The loaded bytes stay in memory, so the `<Image>` that shows it next does not download it again. `src` is any source an `<Image>` takes, a `blob:` URL included (`URL.createObjectURL`, `Clipboard.readImage().url`). The promise rejects if the image cannot be loaded.
+Loads the image and resolves with its size in pixels (of the source image, not a downsampled copy; an SVG's intrinsic size in points, [on the web as the browser measures it](../docs/images-and-assets.md#svg-images)). An imported image with [pixel-density variants](../docs/images-and-assets.md#pixel-densities) loads the variant the views load on this screen and resolves with the imported file's size, whichever variant it loaded (an `<Image>` showing it reports the loaded variant's pixels in `onLoad`). The loaded bytes stay in memory, so the `<Image>` that shows it next does not download it again. `src` is any source an `<Image>` takes, a `blob:` URL included (`URL.createObjectURL`, such as one made from a `Clipboard.readImageBlob` result's `blob`). The promise rejects if the image cannot be loaded.
 
 ```tsx
 import { Image, signal } from "nsh";

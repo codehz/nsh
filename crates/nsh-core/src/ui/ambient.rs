@@ -21,7 +21,10 @@ use super::{
     AdaptiveColor, Environment, Memo, Owner, Signal, SignalEquals, Tokens, cleanup, computed,
     reactive::with_data,
     signal_with,
-    task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, ImageSize},
+    task::{
+        self, Action, Answer, ClipboardImage, ClipboardImageBytes, DialogAnswer, Executor,
+        ImageSize,
+    },
 };
 use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
@@ -389,16 +392,34 @@ pub fn clipboard_has_string() -> Answer<bool> {
     answer
 }
 
-/// Puts the image of a `data:` URI (as [`clipboard_image`] gives) on the
-/// system clipboard (TS: `Clipboard.writeImage`).
+/// Puts the image of a `blob:` URL or a base64 `data:` URI (as
+/// [`clipboard_image`] gives) on the system clipboard (TS:
+/// `Clipboard.writeImage`).
 pub fn set_clipboard_image(uri: impl Into<String>) {
     act(super::services::set_clipboard_image(uri.into()));
+}
+
+/// Puts the image of `bytes` of type `mime` (an encoded PNG, JPEG, ...) on
+/// the system clipboard (TS: `Clipboard.writeImage(blob)`).
+pub fn set_clipboard_image_bytes(bytes: impl Into<Arc<[u8]>>, mime: impl Into<String>) {
+    act(super::services::set_clipboard_image_bytes(
+        bytes.into(),
+        mime.into(),
+    ));
 }
 
 /// The image on the system clipboard, `None` when it holds none (TS:
 /// `Clipboard.readImage`), to await in a task.
 pub fn clipboard_image() -> Answer<Option<ClipboardImage>> {
     let (answer, action) = super::services::clipboard_image();
+    act(action);
+    answer
+}
+
+/// The bytes of the image on the system clipboard, `None` when it holds
+/// none (TS: `Clipboard.readImageBlob`), to await in a task.
+pub fn clipboard_image_bytes() -> Answer<Option<ClipboardImageBytes>> {
+    let (answer, action) = super::services::clipboard_image_bytes();
     act(action);
     answer
 }
@@ -439,9 +460,10 @@ pub fn prefetch_image(src: impl Into<String>) -> super::Prefetch {
     answer
 }
 
-/// The bytes of a `blob:` URL (a [`clipboard_image`]'s `url`, or one
-/// [`set_clipboard_image`] takes from the app), copied; `None` when it is
-/// not a blob URL or was revoked (TS: `fetch(url)`).
+/// The bytes of a `blob:` URL (one `URL.createObjectURL` made), copied;
+/// `None` when it is not a blob URL or was revoked (TS: `fetch(url)`). It
+/// borrows the URL: the JS that made it revokes it with
+/// `URL.revokeObjectURL`.
 pub fn blob_bytes(url: impl Into<String>) -> Answer<Option<Vec<u8>>> {
     let (answer, action) = super::services::blob_bytes(url.into());
     act(action);

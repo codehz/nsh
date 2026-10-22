@@ -1003,8 +1003,9 @@ pub unsafe extern "C" fn nsh_blob_has(ptr: *const u8, len: usize) -> u32 {
 }
 
 /// Stores `bytes` (of type `mime`) as a blob and returns the length of its
-/// URL, kept for [`nsh_blob_url_ptr`]: the URL `ClipboardImage.url` takes
-/// (`readClipboardImage`).
+/// URL, kept for [`nsh_blob_url_ptr`]: the URL a clipboard read answers
+/// (`readClipboardImage`), which the core converts to a `data:` URI or
+/// bytes.
 ///
 /// # Safety
 ///
@@ -1034,6 +1035,22 @@ pub unsafe extern "C" fn nsh_blob_put(
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_blob_url_ptr() -> *const u8 {
     BLOB_URL.with(|u| u.borrow().as_ptr())
+}
+
+/// Removes the blob `ptr..ptr + len` names from the engine's store
+/// (`Clipboard.writeImage` with a `Blob`, once the page has written it).
+/// Returns 1 when it named a live blob.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory holding the URL.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_blob_remove(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: guaranteed by the caller.
+    let url = unsafe { string(ptr, len) };
+    // The bytes `nsh_blob_bytes` last read go with it.
+    BLOB.with(|b| *b.borrow_mut() = None);
+    BLOBS.with(|b| b.borrow().as_ref().is_some_and(|store| store.remove(&url))) as u32
 }
 
 /// Stops the app.

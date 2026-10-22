@@ -10,7 +10,7 @@ order: 8.5
 
 ```rust tabs
 use nsh_core::ui::prelude::*; // set_clipboard、clipboard_string、clipboard_image……
-use nsh_core::ui::ClipboardImage;
+use nsh_core::ui::{ClipboardImage, ClipboardImageBytes};
 ```
 
 ```tsx tabs
@@ -22,14 +22,20 @@ const Clipboard: {
   writeText(text: string): Promise<void>;
   readText(): Promise<string>;
   hasText(): Promise<boolean>;
-  writeImage(src: string): Promise<void>;
+  writeImage(src: string | Blob): Promise<void>;
   readImage(): Promise<ClipboardImage | null>;
+  readImageBlob(): Promise<ClipboardImageBlob | null>;
   hasImage(): Promise<boolean>;
   readFiles(): Promise<string[]>;
 };
 
 interface ClipboardImage {
-  url: string; // blob:nsh://app/…
+  url: string; // data:image/…;base64,…
+  size: { width: number; height: number }; // 像素
+}
+
+interface ClipboardImageBlob {
+  blob: Blob;
   size: { width: number; height: number }; // 像素
 }
 ```
@@ -39,12 +45,13 @@ interface ClipboardImage {
 | `await Clipboard.writeText(text)` | `set_clipboard(text)` |
 | `await Clipboard.readText()` | `clipboard_string().await -> String` |
 | `await Clipboard.hasText()` | `clipboard_has_string().await -> bool` |
-| `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` |
+| `await Clipboard.writeImage(src)` | `set_clipboard_image(src)` 或 `set_clipboard_image_bytes(bytes, mime)` |
 | `await Clipboard.readImage()` | `clipboard_image().await -> Option<ClipboardImage>` |
+| `await Clipboard.readImageBlob()` | `clipboard_image_bytes().await -> Option<ClipboardImageBytes>` |
 | `await Clipboard.hasImage()` | `clipboard_has_image().await -> bool` |
 | `await Clipboard.readFiles()` | `clipboard_files().await -> Vec<String>` |
 
-Rust 的读取函数返回一个应答，在任务中（`spawn`，或 `async` 模块函数）await 它；`ClipboardImage` 是 `nsh_core::ui::ClipboardImage`，含 `url` 和 `size`（一个 `Size<DevicePixels>`）。
+Rust 的读取函数返回一个应答，在任务中（`spawn`，或 `async` 模块函数）await 它；`ClipboardImage` 是 `nsh_core::ui::ClipboardImage`，含 `url`（一个 `data:` URI）和 `size`（一个 `Size<DevicePixels>`）。`ClipboardImageBytes` 含编码后的 `bytes`、它们的 `mime` 和 `size`；TSX 看到的是 `ClipboardImageBlob`（`{ blob, size }`）。
 
 用户也可以自己从[可选文本](../elements/text.md)中复制；剪贴板 API 用于在代码中复制，比如“复制”按钮。
 
@@ -133,7 +140,9 @@ Clipboard.hasText().then((has) => canPaste.set(has));
 readImage(): Promise<ClipboardImage | null>;
 ```
 
-返回剪贴板上的图片，没有时为 `null`：粘贴的截图，或在浏览器、图片编辑器里复制的图片。Rust：`clipboard_image()`，没有时为 `None`。`url` 是图片的 `blob:` URL（PNG，或剪贴板自带的 JPEG、GIF、WebP、BMP），可直接作为 [`Image`](../elements/image.md) 的 `src`；在 TSX 中用 `fetch(url)` 拿到它的字节用于上传，在 Rust 中用 `blob_bytes(url.clone()).await`。字节保存在引擎的存储中、由该 URL 指向：不做 base64 编码，也不会在 VM 堆里多留一份。`size`（`width` 和 `height`）是像素尺寸。和 `readText` 一样，在用户要求粘贴时再读。可读取的图片最大 48 MB；更大的图片 `readImage` 返回 `null`，`hasImage` 返回 `true`。该 URL 一直有效，直到应用用 `URL.revokeObjectURL` 撤销它，或被新的应用替换。
+返回剪贴板上的图片，没有时为 `null`：粘贴的截图，或在浏览器、图片编辑器里复制的图片。Rust：`clipboard_image()`，没有时为 `None`。`url` 是图片的 base64 `data:` URI（PNG，或剪贴板自带的 JPEG、GIF、WebP、BMP），可直接作为 [`Image`](../elements/image.md) 的 `src`；在 TSX 中用 `fetch(url)` 拿到它的字节。它自己拥有字节，不需要撤销。`size`（`width` 和 `height`）是像素尺寸。和 `readText` 一样，在用户要求粘贴时再读。可读取的图片最大 48 MB；更大的图片 `readImage` 返回 `null`，`hasImage` 返回 `true`。
+
+要没有 base64 字符串的字节（上传、大图），用 [`readImageBlob`](#clipboardreadimageblob)。
 
 ```rust tabs
 use nsh_core::ui::{ClipboardImage, prelude::*};
@@ -158,13 +167,6 @@ fn attachments() -> impl IntoElement {
         ))
 }
 
-async fn upload(image: &ClipboardImage) -> Result<HttpResponse, String> {
-    let bytes = blob_bytes(image.url.clone())
-        .await
-        .ok_or("该图片的 blob 已被撤销")?;
-    let request = HttpRequest::post("https://example.com/upload", bytes).header("Content-Type", "image/png");
-    fetch(request).await
-}
 ```
 
 ```tsx tabs
@@ -176,12 +178,6 @@ const attachments = signal<ClipboardImage[]>([]);
 async function paste() {
   const image = await Clipboard.readImage();
   if (image) attachments.set([...attachments(), image]);
-}
-
-async function upload(image: ClipboardImage) {
-  const body = new FormData();
-  body.append("file", await (await fetch(image.url)).blob(), "screenshot.png");
-  await fetch("https://example.com/upload", { method: "POST", body });
 }
 
 <View class="flex-row gap-2">
@@ -216,6 +212,36 @@ keymap.bind("mod+v", async () => {
 }, { when: "always" });
 ```
 
+## Clipboard.readImageBlob
+
+```ts
+readImageBlob(): Promise<ClipboardImageBlob | null>;
+```
+
+返回剪贴板上图片的字节，没有时为 `null`：`blob` 是图片 MIME 类型（PNG，或剪贴板自带的 JPEG、GIF、WebP、BMP）的 `Blob`，`size`（`width` 和 `height`）是像素尺寸。Rust：`clipboard_image_bytes()`，含 `bytes`、`mime` 和 `size`。不做 base64 字符串，也没有需要撤销的 URL；`Blob` 自己拥有字节。可读取的图片最大 48 MB；更大的图片返回 `null`，`hasImage` 返回 `true`。和 `readText` 一样，在用户要求粘贴时再读。要显示图片，用 `URL.createObjectURL(image.blob)` 创建 URL，并在视图销毁时撤销它。
+
+```rust tabs
+use nsh_core::ui::prelude::*;
+
+async fn upload_clipboard_image() -> Result<HttpResponse, String> {
+    let image = clipboard_image_bytes().await.ok_or("剪贴板里没有图片")?;
+    let request = HttpRequest::post("https://example.com/upload", image.bytes.to_vec())
+        .header("Content-Type", image.mime);
+    fetch(request).await
+}
+```
+
+```tsx tabs
+import { Clipboard } from "nsh/clipboard";
+
+const image = await Clipboard.readImageBlob();
+if (image) {
+  const body = new FormData();
+  body.append("file", image.blob, "screenshot.png");
+  await fetch("https://example.com/upload", { method: "POST", body });
+}
+```
+
 ## Clipboard.hasImage
 
 ```ts
@@ -227,17 +253,19 @@ hasImage(): Promise<boolean>;
 ## Clipboard.writeImage
 
 ```ts
-writeImage(src: string): Promise<void>;
+writeImage(src: string | Blob): Promise<void>;
 ```
 
-把 `src` 指定的图片放到剪贴板上，替换原有内容：`src` 是 `blob:` URL（例如 `readImage` 给的，或 `URL.createObjectURL` 生成的），也可以是 base64 `data:` URL。Rust：`set_clipboard_image(src)`。Windows 上接受 PNG，这是浏览器、Office 和截图工具读取的格式。
+把 `src` 指定的图片放到剪贴板上，替换原有内容：`src` 是 `blob:` URL、base64 `data:` URL（`readImage` 给的），或一个 `Blob`（`readImageBlob` 给的）。`Blob` 的类型由字节决定：会嗅探字节，所以 `type` 为空或不同的 `Blob` 也会按其内容写入；不是图片的字节不写入。Rust：URL 用 `set_clipboard_image(src)`，字节用 `set_clipboard_image_bytes(bytes, mime)`。Windows 上接受 PNG，这是浏览器、Office 和截图工具读取的格式。
 
 ```rust tabs
 set_clipboard_image(image.url.clone());
+// 或用字节：set_clipboard_image_bytes(image.bytes, image.mime);
 ```
 
 ```tsx tabs
 await Clipboard.writeImage(image.url);
+// 或：await Clipboard.writeImage(image.blob);
 ```
 
 ## Clipboard.readFiles
@@ -262,4 +290,4 @@ const names = files.map((url) => decodeURIComponent(new URL(url).pathname.split(
 ```
 
 > [!NOTE]
-> 如果应用在 `nsh.json` 中声明了 `capabilities`，必须用 `"clipboard": true` 授予剪贴板。否则 `writeText` 和 `writeImage` 不做任何事，`readText` 返回 `""`，`readImage` 返回 `null`，`readFiles` 返回 `[]`，`hasText` 和 `hasImage` 返回 `false`，Rust 与 TSX 都是如此。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+> 如果应用在 `nsh.json` 中声明了 `capabilities`，必须用 `"clipboard": true` 授予剪贴板。否则 `writeText` 和 `writeImage` 不做任何事，`readText` 返回 `""`，`readImage` 和 `readImageBlob` 返回 `null`，`readFiles` 返回 `[]`，`hasText` 和 `hasImage` 返回 `false`，Rust 与 TSX 都是如此。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。

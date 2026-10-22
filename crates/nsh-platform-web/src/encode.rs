@@ -1370,6 +1370,22 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             .str("setClipboardImage")
             .str(uri)
             .end(),
+        Command::SetClipboardImageBytes { bytes, mime } => {
+            // JSON carries no bytes: the store holds them until the page has
+            // written the clipboard (`writeClipboardImage` releases them).
+            let url = crate::BLOBS.with(|b| {
+                b.borrow()
+                    .as_ref()
+                    .map(|store| store.put(bytes.clone(), mime.clone()))
+                    .unwrap_or_default()
+            });
+            out.item("cmd")
+                .num(id)
+                .str("setClipboardImage")
+                .str(&url)
+                .bool(true)
+                .end();
+        }
         Command::ReadClipboardImage {
             id: request,
             has_only,

@@ -1224,6 +1224,15 @@ pub enum Command {
     /// the system clipboard, replacing what it holds (on the root;
     /// `Clipboard.writeImage`).
     SetClipboardImage(String),
+    /// Put the image of `bytes` (an encoded PNG, JPEG, ...) of type `mime`
+    /// on the system clipboard, replacing what it holds (on the root;
+    /// `Clipboard.writeImage` with a `Blob`).
+    SetClipboardImageBytes {
+        /// The encoded bytes.
+        bytes: Arc<[u8]>,
+        /// Their MIME type (`image/png`).
+        mime: String,
+    },
     /// Read the image on the system clipboard and report it as
     /// [`EventKind::Clipboard`] `id` (on the root): `has` and, unless
     /// `has_only`, the image as a `blob:` URL (`uri`, its bytes in the

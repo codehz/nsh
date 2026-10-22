@@ -408,9 +408,9 @@ impl ClipboardAnswer {
             }
         }
         // Only an image NSH can show and the VM can hold: a `blob:` URL of
-        // this engine's store (the platforms' answers), or a `data:` URI an
-        // app passed on (the web's player encodes its own). A blob over the
-        // limit is freed, as its bytes would only be held for nothing.
+        // this engine's store (the platforms' answers), or a `data:` URI
+        // (an app's own, or a platform's older form). A blob over the limit
+        // is freed, as its bytes would only be held for nothing.
         let limit = crate::platform::clipboard::MAX_IMAGE_BYTES;
         answer.image = uri
             .filter(|url| {
@@ -4414,10 +4414,12 @@ impl<M: TextEngine> Core<M> {
                         has_only: false,
                     },
                     ClipboardRead::Has(_) => Command::ReadClipboard { id, has_only: true },
-                    ClipboardRead::Image(_) => Command::ReadClipboardImage {
-                        id,
-                        has_only: false,
-                    },
+                    ClipboardRead::Image(_) | ClipboardRead::ImageBlob(_) => {
+                        Command::ReadClipboardImage {
+                            id,
+                            has_only: false,
+                        }
+                    }
                     ClipboardRead::HasImage(_) => {
                         Command::ReadClipboardImage { id, has_only: true }
                     }
@@ -4528,14 +4530,52 @@ impl<M: TextEngine> Core<M> {
             image,
             files,
         } = answer;
+        let blobs = self.blobs.clone();
         match self.components.clipboard_reads.remove(&id) {
             Some(ClipboardRead::Text(slot)) => slot.borrow_mut().deliver(text.unwrap_or_default()),
             Some(ClipboardRead::Has(slot) | ClipboardRead::HasImage(slot)) => {
                 slot.borrow_mut().deliver(has)
             }
-            Some(ClipboardRead::Image(slot)) => slot
-                .borrow_mut()
-                .deliver(image.filter(|i| !i.url.is_empty())),
+            Some(ClipboardRead::Image(slot)) => {
+                slot.borrow_mut().deliver(image.and_then(|image| {
+                    if image.url.is_empty() {
+                        return None;
+                    }
+                    match blobs.get(&image.url) {
+                        Some(entry) => {
+                            let url =
+                                crate::platform::clipboard::data_uri(&entry.mime, &entry.bytes);
+                            blobs.remove(&image.url);
+                            Some(crate::ui::ClipboardImage {
+                                url,
+                                size: image.size,
+                            })
+                        }
+                        None if image.url.starts_with("data:") => Some(image),
+                        None => None,
+                    }
+                }))
+            }
+            Some(ClipboardRead::ImageBlob(slot)) => {
+                slot.borrow_mut().deliver(image.and_then(|image| {
+                    if let Some(entry) = blobs.get(&image.url) {
+                        blobs.remove(&image.url);
+                        Some(crate::ui::ClipboardImageBytes {
+                            bytes: entry.bytes,
+                            mime: entry.mime,
+                            size: image.size,
+                        })
+                    } else {
+                        crate::platform::clipboard::decode_data_uri(&image.url).map(
+                            |(mime, bytes)| crate::ui::ClipboardImageBytes {
+                                bytes: Arc::from(bytes),
+                                mime: mime.to_owned(),
+                                size: image.size,
+                            },
+                        )
+                    }
+                }));
+            }
             Some(ClipboardRead::Files(slot)) => slot.borrow_mut().deliver(files),
             None => {}
         }

@@ -135,8 +135,8 @@ image(move || user.with(|u| u.avatar_url.clone()))
 
 ## Blob URL
 
-图片来源也可以是 `blob:` URL：`URL.createObjectURL(blob)` 存入引擎的字节、剪贴板图片的 `url`
-（[`Clipboard.readImage`](../modules/nsh-clipboard.md#clipboardreadimage)），或应用自己生成的。平台从引擎的存储中读取它们，所以
+图片来源也可以是 `blob:` URL：`URL.createObjectURL(blob)` 存入引擎的字节、由剪贴板图片的 `Blob` 生成的 URL
+（[`Clipboard.readImageBlob`](../modules/nsh-clipboard.md#clipboardreadimageblob)），或应用自己生成的。平台从引擎的存储中读取它们，所以
 图片不需要 `data:` URI —— 没有 base64 这一步，也不会多一份拷贝，与大小无关。`src` 和 `placeholder`、`Image.getSize` 与
 `Image.prefetch`、canvas 的 `drawImage` 以及 `Clipboard.writeImage` 都接受它们，`fetch` 也能读取其字节。撤销后的 URL
 什么也加载不到。它们不是资源：不会被打包，并且随应用结束。

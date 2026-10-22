@@ -13,6 +13,7 @@ use std::{
     cell::RefCell,
     cmp::Reverse,
     collections::{BinaryHeap, VecDeque},
+    fmt,
     future::Future,
     pin::Pin,
     rc::{Rc, Weak},
@@ -118,6 +119,8 @@ pub(crate) enum ClipboardRead {
     Has(AnswerSlot<bool>),
     /// The image (`None` when it holds none).
     Image(AnswerSlot<Option<ClipboardImage>>),
+    /// The image's bytes (`None` when it holds none).
+    ImageBlob(AnswerSlot<Option<ClipboardImageBytes>>),
     /// Whether it holds an image.
     HasImage(AnswerSlot<bool>),
     /// The `file:` URLs of the local files on it.
@@ -127,13 +130,141 @@ pub(crate) enum ClipboardRead {
 /// An image read from the system clipboard (`Clipboard.readImage`).
 #[derive(Debug, Clone, Default, PartialEq, super::JsObject)]
 pub struct ClipboardImage {
-    /// Its bytes' `blob:` URL in the engine's store: an image's `src`,
-    /// `fetch(url)`, a canvas's `drawImage`, and
-    /// [`super::ambient::blob_bytes`](crate::ui::ambient::blob_bytes) all
-    /// read it, until the app revokes it with `URL.revokeObjectURL`.
+    /// The image as a base64 `data:` URI (`data:image/png;base64,…`): an
+    /// image's `src`, and `fetch(url)` gives its bytes. Use
+    /// [`ClipboardImageBytes`] (TS: `Clipboard.readImageBlob`) for the bytes
+    /// themselves.
     pub url: String,
     /// Its size in pixels.
     pub size: Size<DevicePixels>,
+}
+
+/// An image read from the system clipboard as bytes
+/// (`Clipboard.readImageBlob`; TS: `ClipboardImageBlob`, whose `blob` is
+/// these bytes).
+#[derive(Clone, Default)]
+#[non_exhaustive]
+pub struct ClipboardImageBytes {
+    /// Its encoded bytes (PNG, JPEG, ...).
+    pub bytes: Arc<[u8]>,
+    /// Their MIME type (`image/png`).
+    pub mime: String,
+    /// Its size in pixels.
+    pub size: Size<DevicePixels>,
+}
+
+impl fmt::Debug for ClipboardImageBytes {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClipboardImageBytes")
+            .field("bytes", &self.bytes.len())
+            .field("mime", &self.mime)
+            .field("size", &self.size)
+            .finish()
+    }
+}
+
+/// The image a `Clipboard.writeImage` call takes: a `blob:` URL, a base64
+/// `data:` URL, or a `Blob`'s bytes (TS: `string | Blob`).
+#[derive(Clone)]
+#[non_exhaustive]
+pub enum ClipboardImageSource {
+    /// A `blob:` URL (in the engine's store) or a base64 `data:` URL.
+    Url(String),
+    /// A `Blob`'s bytes and its type (ignored: the bytes are sniffed).
+    Blob {
+        /// Its bytes.
+        bytes: Arc<[u8]>,
+        /// Its advertised MIME type.
+        mime: String,
+    },
+}
+
+impl fmt::Debug for ClipboardImageSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Url(url) => f.debug_tuple("Url").field(url).finish(),
+            Self::Blob { bytes, mime } => f
+                .debug_struct("Blob")
+                .field("bytes", &bytes.len())
+                .field("mime", mime)
+                .finish(),
+        }
+    }
+}
+
+/// TS: `ClipboardImageBlob` (`{ blob: Blob; size: Size }`).
+impl super::JsValue for ClipboardImageBytes {
+    fn ts_type(types: &mut super::TsTypes) -> String {
+        types.declare("ClipboardImageBlob", |_| {
+            "/** An image read from the clipboard as bytes (`Clipboard.readImageBlob`). */\n\
+             export interface ClipboardImageBlob {\n\
+             \x20 /** Its encoded bytes. */\n\
+             \x20 blob: Blob;\n\
+             \x20 /** Its size in pixels. */\n\
+             \x20 size: Size;\n\
+             }"
+            .into()
+        })
+    }
+
+    fn from_js(value: super::JsIn<'_>) -> Result<Self, super::PropError> {
+        if value.kind() != super::JsKind::Object {
+            return Err(value.expected("an object with blob and size"));
+        }
+        let blob = value.field("blob")?;
+        let (bytes, mime) = value
+            .host()
+            .blob(blob.get().raw())
+            .ok_or_else(|| blob.get().expected("a Blob"))?;
+        let size = Size::<DevicePixels>::from_js(value.field("size")?.get())
+            .map_err(|e| super::PropError(format!("`size`: {e}")))?;
+        Ok(ClipboardImageBytes { bytes, mime, size })
+    }
+
+    fn to_js<'a>(
+        &self,
+        host: &'a dyn super::JsHost,
+    ) -> Result<super::JsOwned<'a>, super::PropError> {
+        let owned = super::JsOwned::new(host, host.new_object()?);
+        let object = owned.get().raw();
+        let blob = host.new_blob(self.bytes.clone(), &self.mime)?;
+        host.set_field(object, "blob", blob)?;
+        host.set_field(object, "size", self.size.to_js(host)?.into_raw())?;
+        Ok(owned)
+    }
+}
+
+/// TS: `string | Blob`.
+impl super::JsValue for ClipboardImageSource {
+    fn ts_type(_types: &mut super::TsTypes) -> String {
+        "string | Blob".into()
+    }
+
+    fn from_js(value: super::JsIn<'_>) -> Result<Self, super::PropError> {
+        if value.kind() == super::JsKind::String {
+            return value
+                .as_string()
+                .map(Self::Url)
+                .ok_or_else(|| value.expected("a string or a Blob"));
+        }
+        value
+            .as_blob()
+            .map(|(bytes, mime)| Self::Blob { bytes, mime })
+            .ok_or_else(|| value.expected("a string or a Blob"))
+    }
+
+    fn to_js<'a>(
+        &self,
+        host: &'a dyn super::JsHost,
+    ) -> Result<super::JsOwned<'a>, super::PropError> {
+        match self {
+            Self::Url(url) => Ok(super::JsOwned::new(host, host.new_string(url)?)),
+            Self::Blob { bytes, mime } => Ok(super::JsOwned::new(
+                host,
+                host.new_blob(bytes.clone(), mime)?,
+            )),
+        }
+    }
 }
 
 /// An image's size in pixels (`Image.getSize`); TS: `ImageSize`, an alias of

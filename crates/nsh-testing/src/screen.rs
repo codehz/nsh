@@ -389,7 +389,9 @@ impl Screen {
             Command::Dialog(dialog) => self.dialogs.push((**dialog).clone()),
             Command::SetClipboard(text) => self.clipboard = Some(text.clone()),
             // An image replaces the text.
-            Command::SetClipboardImage(_) => self.clipboard = None,
+            Command::SetClipboardImage(_) | Command::SetClipboardImageBytes { .. } => {
+                self.clipboard = None
+            }
             Command::ReadClipboard { id, has_only } => self.clipboard_reads.push((*id, *has_only)),
             Command::ReadClipboardImage { .. } => {
                 self.unsupported.push("reading an image from the clipboard");

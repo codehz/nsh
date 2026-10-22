@@ -10,9 +10,9 @@ use crate::{EventPayload, PayloadValue};
 
 /// The largest image a clipboard read gives, in bytes (48 MiB). Its bytes
 /// stay in the engine's [`BlobStore`](crate::blob::BlobStore), which the
-/// answer's `blob:` URL names: no base64 form, no `data:` copy and no
-/// second copy in the VM's heap. A larger image reads as none (`has` stays
-/// true).
+/// answer's `blob:` URL names; `Clipboard.readImage` converts them to a
+/// `data:` URI and `readImageBlob` hands them over as bytes. A larger image
+/// reads as none (`has` stays true).
 pub const MAX_IMAGE_BYTES: usize = 48 << 20;
 
 /// Whether `uri`, a clipboard image's `data:` URI (an app's older form),

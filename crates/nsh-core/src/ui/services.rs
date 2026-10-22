@@ -7,12 +7,13 @@
 use std::{
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context as TaskContext, Poll},
 };
 
 use super::{
     Answer, ImageSize, PropEnum,
-    task::{Action, AnswerSlot, ClipboardImage, ClipboardRead},
+    task::{Action, AnswerSlot, ClipboardImage, ClipboardImageBytes, ClipboardRead},
 };
 use crate::{
     Command, ROOT_ID,
@@ -134,15 +135,30 @@ pub(crate) fn clipboard_has_string() -> (Answer<bool>, Action) {
     (answer, Action::ReadClipboard(ClipboardRead::Has(slot)))
 }
 
-/// Puts the image of the `data:` URI `uri` on the system clipboard.
+/// Puts the image of the `blob:` URL or `data:` URI `uri` on the system
+/// clipboard.
 pub(crate) fn set_clipboard_image(uri: String) -> Action {
     Action::Command(ROOT_ID, Command::SetClipboardImage(uri))
+}
+
+/// Puts the image of `bytes` of type `mime` on the system clipboard.
+pub(crate) fn set_clipboard_image_bytes(bytes: Arc<[u8]>, mime: String) -> Action {
+    Action::Command(ROOT_ID, Command::SetClipboardImageBytes { bytes, mime })
 }
 
 /// The image on the system clipboard (`None` when it holds none).
 pub(crate) fn clipboard_image() -> (Answer<Option<ClipboardImage>>, Action) {
     let (answer, slot) = Answer::new();
     (answer, Action::ReadClipboard(ClipboardRead::Image(slot)))
+}
+
+/// The image's bytes on the system clipboard (`None` when it holds none).
+pub(crate) fn clipboard_image_bytes() -> (Answer<Option<ClipboardImageBytes>>, Action) {
+    let (answer, slot) = Answer::new();
+    (
+        answer,
+        Action::ReadClipboard(ClipboardRead::ImageBlob(slot)),
+    )
 }
 
 /// Whether the system clipboard holds an image (without reading it).
