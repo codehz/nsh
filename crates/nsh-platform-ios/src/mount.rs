@@ -1170,7 +1170,7 @@ impl Mounter {
                 crate::system::set_clipboard_image(&self.blobs, &uri)
             }
             (Command::SetClipboardImageBytes { bytes, mime }, _) => {
-                crate::system::set_clipboard_image_bytes(mime, bytes)
+                crate::system::set_clipboard_image_bytes(&mime, &bytes)
             }
             (Command::ReadClipboardImage { id, has_only }, _) => self.control.dispatch_event(
                 nsh_core::ROOT_ID,
