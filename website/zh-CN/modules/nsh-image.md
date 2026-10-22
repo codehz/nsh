@@ -34,7 +34,7 @@ interface ImageSize {
 }
 ```
 
-加载图片，并 resolve 为它的像素尺寸（源图片的尺寸，而不是降采样后的副本；SVG 为它以点为单位的固有尺寸，[在 Web 上为浏览器测得的尺寸](../docs/images-and-assets.md#svg-图片)）。带有[像素密度变体](../docs/images-and-assets.md#像素密度)的导入图片会加载视图在当前屏幕上加载的变体，并 resolve 为导入文件的尺寸，无论加载的是哪个变体（显示它的 `<Image>` 在 `onLoad` 中报告所加载变体的像素尺寸）。加载的数据会保留在内存中，接下来显示它的 `<Image>` 不会再次下载。图片无法加载时 Promise 会 reject。
+加载图片，并 resolve 为它的像素尺寸（源图片的尺寸，而不是降采样后的副本；SVG 为它以点为单位的固有尺寸，[在 Web 上为浏览器测得的尺寸](../docs/images-and-assets.md#svg-图片)）。带有[像素密度变体](../docs/images-and-assets.md#像素密度)的导入图片会加载视图在当前屏幕上加载的变体，并 resolve 为导入文件的尺寸，无论加载的是哪个变体（显示它的 `<Image>` 在 `onLoad` 中报告所加载变体的像素尺寸）。加载的数据会保留在内存中，接下来显示它的 `<Image>` 不会再次下载。`src` 可以是 `<Image>` 接受的任何来源，包括 `blob:` URL（`URL.createObjectURL`、`Clipboard.readImage().url`）。图片无法加载时 Promise 会 reject。
 
 ```tsx
 import { Image, signal } from "nsh";
@@ -53,7 +53,7 @@ Image.getSize(url).then(({ width, height }) => ratio.set(width / height));
 prefetch(src: string | ImageAsset): Promise<boolean>;
 ```
 
-在显示之前预先加载图片。数据进入内存后 resolve 为 `true`（无法加载时为 `false`）。对于带有像素密度变体的导入图片，它加载视图在当前屏幕上加载的那个变体。适合用于相册的下一页，或点击后才会显示的图片。
+在显示之前预先加载图片，来源与 `<Image>` 相同（包括 `blob:` URL）。数据进入内存后 resolve 为 `true`（无法加载时为 `false`）。对于带有像素密度变体的导入图片，它加载视图在当前屏幕上加载的那个变体。适合用于相册的下一页，或点击后才会显示的图片。
 
 ```ts
 const next = photos.slice(index + 1, index + 4);

@@ -439,6 +439,15 @@ pub fn prefetch_image(src: impl Into<String>) -> super::Prefetch {
     answer
 }
 
+/// The bytes of a `blob:` URL (a [`clipboard_image`]'s `url`, or one
+/// [`set_clipboard_image`] takes from the app), copied; `None` when it is
+/// not a blob URL or was revoked (TS: `fetch(url)`).
+pub fn blob_bytes(url: impl Into<String>) -> Answer<Option<Vec<u8>>> {
+    let (answer, action) = super::services::blob_bytes(url.into());
+    act(action);
+    answer
+}
+
 /// Makes an HTTP request (in a task: await its response; TS: `fetch`) with
 /// the engine's network stack, the one JS's `fetch` uses: the platform's
 /// on native targets and the browser's on the web, under the app's

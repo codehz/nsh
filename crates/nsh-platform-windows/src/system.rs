@@ -458,22 +458,26 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 clipboard_answer(*id, has, text),
             );
         }
-        Command::SetClipboardImage(uri) => match clipboard::decode_data_uri(uri) {
-            Some(("image/png", bytes)) => {
-                if !set_clipboard_bytes(png_format(), &bytes) {
-                    log::debug!("windows: cannot set the clipboard");
+        Command::SetClipboardImage(uri) => {
+            let blobs = surface.blobs.borrow().clone();
+            match clipboard::image_bytes(&blobs, uri) {
+                Some((mime, bytes)) if mime == "image/png" => {
+                    if !set_clipboard_bytes(png_format(), &bytes) {
+                        log::debug!("windows: cannot set the clipboard");
+                    }
                 }
+                _ => log::warn!("Clipboard.writeImage: Windows takes a PNG blob: or data: URL"),
             }
-            _ => log::warn!("Clipboard.writeImage: Windows takes a base64 PNG data: URI"),
-        },
+        }
         Command::ReadClipboardImage { id, has_only } => {
             let has = clipboard_has_image();
             let bytes = (has && !*has_only).then(clipboard_image).flatten();
             let image = bytes.as_deref().and_then(clipboard::Image::sniff);
+            let blobs = surface.blobs.borrow().clone();
             surface.event(
                 ROOT_ID,
                 EventKind::Clipboard,
-                clipboard::image_answer(*id, has, image),
+                clipboard::image_answer(&blobs, *id, has, image),
             );
         }
         Command::ReadClipboardFiles { id } => surface.event(

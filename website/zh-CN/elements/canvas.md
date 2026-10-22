@@ -146,7 +146,7 @@ Animated.timing(angle, { toValue: Math.PI * 2, duration: 1000 }).start();
 
 ## 上下文
 
-`CanvasRenderingContext2D` 是浏览器版本的一个子集，`Painter` 以 snake case 方法提供同样的操作（`move_to`、`line_to`、`fill_rect`、`fill_text`、`stroke_color` 等）：状态栈（`save`、`restore`）、变换、路径（`moveTo`、`lineTo`、`arc`、`arcTo`、`ellipse`、`rect`、`roundRect`、贝塞尔曲线）、`fill` / `stroke` / `clip`（也可作用于 `Path2D`，后者接受 SVG 路径数据；Rust 中为 `fill_svg` / `stroke_svg`）、矩形、文字（`fillText`、`strokeText`、`measureText`）、线性 / 径向 / 锥形渐变、虚线、阴影、`globalAlpha`、`globalCompositeOperation` 以及 `drawImage`（图片可以是 URL 或资源）。所有成员见 [Canvas API 参考](../modules/nsh-canvas.md)；[画布指南](../docs/canvas.md)介绍了如何绘制图表和动画图形。
+`CanvasRenderingContext2D` 是浏览器版本的一个子集，`Painter` 以 snake case 方法提供同样的操作（`move_to`、`line_to`、`fill_rect`、`fill_text`、`stroke_color` 等）：状态栈（`save`、`restore`）、变换、路径（`moveTo`、`lineTo`、`arc`、`arcTo`、`ellipse`、`rect`、`roundRect`、贝塞尔曲线）、`fill` / `stroke` / `clip`（也可作用于 `Path2D`，后者接受 SVG 路径数据；Rust 中为 `fill_svg` / `stroke_svg`）、矩形、文字（`fillText`、`strokeText`、`measureText`）、线性 / 径向 / 锥形渐变、虚线、阴影、`globalAlpha`、`globalCompositeOperation` 以及 `drawImage`（图片可以是 URL、资源或 `blob:` URL）。所有成员见 [Canvas API 参考](../modules/nsh-canvas.md)；[画布指南](../docs/canvas.md)介绍了如何绘制图表和动画图形。
 
 坐标单位是点，原点在左上角。`measureText` 是同步的，返回 `width`。Rust 的 `Painter` 也能做命中测试（`is_point_in_path`、`is_point_in_stroke`）。
 

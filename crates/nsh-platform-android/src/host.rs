@@ -65,6 +65,9 @@ pub(crate) struct Host {
     storage: Mutex<Option<std::path::PathBuf>>,
     /// What the running app may reach (web view navigations check it).
     access: Mutex<Arc<nsh_engine::Access>>,
+    /// The running app's `blob:` URLs: the engine's store, which images and
+    /// canvases read (Java asks with `Native.readBlob`).
+    pub(crate) blobs: Mutex<nsh_core::blob::BlobStore>,
     #[cfg(feature = "dev")]
     pub(crate) dev: Mutex<Option<crate::dev::DevSession>>,
     /// A test session's model of the app (`nsh test --target android`):
@@ -119,6 +122,8 @@ impl Host {
         drop(self.engine.lock().expect("engine").take());
         *self.animation_queue.lock().expect("queue") = VecDeque::new();
         *self.ui.lock().expect("ui") = UiAnimation::default();
+        // The previous app's blobs go with it.
+        *self.blobs.lock().expect("blobs") = nsh_core::blob::BlobStore::default();
         #[allow(unused_mut)]
         let mut config = EngineConfig {
             app,
@@ -248,11 +253,12 @@ impl Host {
 /// files.
 fn answer_clipboard_reads(host: &Host, batch: &MountBatch) {
     use nsh_core::{Command, platform::clipboard};
+    let blobs = host.blobs.lock().expect("blobs").clone();
     let reads = batch.items.iter().filter_map(|item| match item {
         MountItem::Command {
             command: Command::ReadClipboardImage { id, .. },
             ..
-        } => Some(clipboard::image_answer(*id, false, None)),
+        } => Some(clipboard::image_answer(&blobs, *id, false, None)),
         MountItem::Command {
             command: Command::ReadClipboardFiles { id },
             ..
@@ -276,6 +282,10 @@ fn answer_clipboard_reads(host: &Host, batch: &MountBatch) {
 struct Sink(Arc<Host>);
 
 impl MountSink for Sink {
+    fn blobs(&self) -> Option<nsh_core::blob::BlobStore> {
+        Some(self.0.blobs.lock().ok()?.clone())
+    }
+
     fn submit(&self, batch: MountBatch) {
         let host = &self.0;
         #[cfg(feature = "dev")]
@@ -433,6 +443,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         data_dir,
         storage: Mutex::new(None),
         access: Mutex::new(Arc::default()),
+        blobs: Mutex::new(nsh_core::blob::BlobStore::default()),
         #[cfg(feature = "dev")]
         dev: Mutex::new(None),
         #[cfg(feature = "dev")]
@@ -573,6 +584,30 @@ extern "system" fn Java_com_longbridge_nsh_Native_mediaRedirect<'local>(
             .unwrap_or_else(|_| JString::from(JObject::null())),
         Err(_) => JString::from(JObject::null()),
     }
+}
+
+/// The bytes a `blob:` URL names, for Java's image loader
+/// (`Images.BlobReader`); null when it names no live blob.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_readBlob<'local>(
+    mut env: JNIEnv<'local>,
+    _: JClass<'local>,
+    handle: jlong,
+    uri: JString<'local>,
+) -> JByteArray<'local> {
+    if handle == 0 {
+        return JByteArray::default();
+    }
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let Ok(uri) = env.get_string(&uri) else {
+        return JByteArray::default();
+    };
+    let blobs = host.blobs.lock().expect("blobs").clone();
+    let Some(entry) = blobs.get(&String::from(uri)) else {
+        return JByteArray::default();
+    };
+    env.byte_array_from_slice(&entry.bytes).unwrap_or_default()
 }
 
 #[unsafe(no_mangle)]

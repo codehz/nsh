@@ -371,6 +371,8 @@ pub(crate) struct Mounter {
     dirty_modals: Vec<NodeId>,
     /// Where `asset:/` URIs of videos resolve.
     asset_base: Option<AssetBase>,
+    /// The engine's `blob:` URLs ([`crate::surface::RootViewIvars::blobs`]).
+    blobs: nsh_core::blob::BlobStore,
     /// Report touches to JS: on the root and on each modal's root.
     touch_trackers: Vec<(NodeId, Retained<crate::touch::TouchTracker>)>,
     /// Views listening to touches (the trackers run while there are any).
@@ -395,6 +397,7 @@ impl Mounter {
         control: EngineControl,
         shared: SharedMounter,
         asset_base: Option<AssetBase>,
+        blobs: nsh_core::blob::BlobStore,
         access: std::sync::Arc<nsh_engine::Access>,
         components: crate::component::Components,
     ) -> Self {
@@ -412,6 +415,7 @@ impl Mounter {
             target,
             images: ImageLoader::new(
                 asset_base.clone(),
+                blobs.clone(),
                 {
                     let shared = shared.clone();
                     std::sync::Arc::new(move |event| {
@@ -441,6 +445,7 @@ impl Mounter {
             dirty_headers: Vec::new(),
             dirty_modals: Vec::new(),
             asset_base: asset_base.clone(),
+            blobs,
             sticky: Default::default(),
             touch_trackers: Vec::new(),
             touch_listeners: 0,
@@ -1161,11 +1166,13 @@ impl Mounter {
                     EventPayload::Map(fields),
                 );
             }
-            (Command::SetClipboardImage(uri), _) => crate::system::set_clipboard_image(&uri),
+            (Command::SetClipboardImage(uri), _) => {
+                crate::system::set_clipboard_image(&self.blobs, &uri)
+            }
             (Command::ReadClipboardImage { id, has_only }, _) => self.control.dispatch_event(
                 nsh_core::ROOT_ID,
                 EventKind::Clipboard,
-                crate::system::read_clipboard_image(id, has_only),
+                crate::system::read_clipboard_image(&self.blobs, id, has_only),
             ),
             (Command::ReadClipboardFiles { id }, _) => self.control.dispatch_event(
                 nsh_core::ROOT_ID,

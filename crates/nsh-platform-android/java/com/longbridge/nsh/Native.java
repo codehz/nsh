@@ -86,6 +86,12 @@ final class Native {
 
     static native void destroy(long handle);
 
+    /**
+     * The bytes a {@code blob:} URL names (in the engine's store), or null when it names no live blob. Any
+     * thread.
+     */
+    static native byte[] readBlob(long handle, String uri);
+
     /** What loaded apps are granted at most (capabilities JSON; null: no ceiling); false if invalid. */
     static native boolean setGranted(long handle, String capabilities);
 

@@ -315,33 +315,19 @@ pub(crate) fn random_hex() -> String {
     format!("{a:016x}{:016x}", h.finish())
 }
 
-/// The blobs of `blob:` URLs, per context.
-#[derive(Default)]
-pub(crate) struct BlobUrls {
-    map: Vec<(String, Blob)>,
-}
-
-fn blob_urls<'a>(cx: Ctx) -> &'a mut BlobUrls {
-    // SAFETY: a projection of the state's field, briefly.
-    unsafe { &mut (*crate::state::state(cx)).web.blob_urls }
-}
-
-/// The blob `url` names (`blob:…`), if registered.
-pub(crate) fn resolve_blob_url(cx: Ctx, url: &str) -> Option<Blob> {
-    let url = url.split('#').next().unwrap_or(url);
-    blob_urls(cx)
-        .map
-        .iter()
-        .find(|(u, _)| u == url)
-        .map(|(_, b)| b.clone())
+/// The blobs of `blob:` URLs, in the engine's store: the one the core and
+/// the platform load images, canvases and clipboard images from.
+pub(crate) fn resolve_blob_url(cx: Ctx, url: &str) -> Option<nsh_core::blob::BlobEntry> {
+    super::web(cx).blobs.get(url)
 }
 
 native!(
     fn create_object_url(cx, this, args) {
         let b = blob_of(cx, args.get(0))?
             .ok_or_else(|| js::type_error(cx, "createObjectURL needs a Blob"))?;
-        let url = format!("blob:nsh://app/{}", random_hex());
-        blob_urls(cx).map.push((url.clone(), b));
+        let url = super::web(cx)
+            .blobs
+            .put(b.bytes().to_vec(), b.mime.clone());
         js::string(cx, &url)
     }
 );
@@ -349,7 +335,7 @@ native!(
 native!(
     fn revoke_object_url(cx, this, args) {
         let url = js::to_string(cx, args.get(0))?;
-        blob_urls(cx).map.retain(|(u, _)| *u != url);
+        super::web(cx).blobs.remove(&url);
         Ok(V::undefined())
     }
 );

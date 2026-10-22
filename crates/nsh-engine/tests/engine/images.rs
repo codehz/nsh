@@ -296,6 +296,76 @@ fn variant_info_get_size_keeps_imported_dimensions_for_mismatched_variants() {
     }
 }
 
+const BLOB_APP: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { Image } from "nsh/image";
+
+const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const url = URL.createObjectURL(new Blob([png], { type: "image/png" }));
+const shown = signal("waiting");
+setTimeout(async () => {
+  const size = await Image.getSize(url);
+  shown.set(`${size.width}x${size.height}`);
+}, 0);
+
+mount(() => (
+  <View>
+    <Image src={url} />
+    <Text>{shown()}</Text>
+  </View>
+));
+"#;
+
+/// A `URL.createObjectURL` URL reaches the platform as it is (a `blob:`
+/// URL its image loader reads from the engine's store), for an image's
+/// `src` and for `Image.getSize`; nothing becomes a `data:` URI.
+#[test]
+fn blob_urls_reach_the_platform_unchanged() {
+    let (engine, rx) = start(BLOB_APP, 1.0);
+    let control = engine.control();
+    let mut sources: Vec<String> = Vec::new();
+    let mut asked: Vec<String> = Vec::new();
+    let mut shown = String::new();
+    while shown.is_empty() || shown == "waiting" {
+        let Ok(batch) = rx.recv_timeout(WAIT) else {
+            break;
+        };
+        for item in &batch.items {
+            match item {
+                MountItem::Image {
+                    source, options, ..
+                } => {
+                    if let Some(source) = source {
+                        sources.push(source.uri.to_string());
+                    }
+                    assert!(options.placeholder.is_none());
+                }
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::ImageInfo { id, uri },
+                } => {
+                    asked.push(uri.clone());
+                    control.dispatch_event(
+                        ROOT_ID,
+                        EventKind::ImageInfo,
+                        EventPayload::Map(vec![
+                            ("id", PayloadValue::Number(*id as f64)),
+                            ("width", PayloadValue::Number(1.0)),
+                            ("height", PayloadValue::Number(1.0)),
+                        ]),
+                    );
+                }
+                MountItem::Text { text, .. } => shown = text.text.clone(),
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(shown, "1x1", "getSize answered");
+    let source = sources.first().expect("the image's source").clone();
+    assert!(source.starts_with("blob:nsh://app/"), "{source}");
+    assert!(!source.contains("data:"), "{source}");
+    assert_eq!(asked, [source], "getSize asks for the same URL");
+}
+
 /// `src` and `placeholder` are names several elements take: each decodes
 /// as its element's prop (an image's placeholder is an image, an input's a
 /// text), and a web view's `src`, `html` and `baseUrl` make one source.

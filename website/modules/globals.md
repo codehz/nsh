@@ -222,7 +222,9 @@ class URL {
   constructor(url: string | URL, base?: string | URL);
   static canParse(url: string | URL, base?: string | URL): boolean;
   static parse(url: string | URL, base?: string | URL): URL | null;
-  /** A `blob:` URL `fetch` reads `blob` from, until revoked. */
+  /** A `blob:` URL of `blob`, until revoked: `fetch` (a GET) reads it, and so
+   * do an image's `src` and `placeholder`, `Image.getSize` /
+   * `Image.prefetch`, a canvas's `drawImage` and `Clipboard.writeImage`. */
   static createObjectURL(blob: Blob): string;
   static revokeObjectURL(url: string): void;
   href: string;
@@ -277,7 +279,7 @@ url.href; // "https://api.example.com/v1/items?page=2&tag=new"
 
 The iterators of `URLSearchParams` (and of `Headers` and `FormData`) iterate over a snapshot taken when the iterator was created, and have the iterator helpers (`map`, `filter`, `toArray`, ...).
 
-`URL.createObjectURL(blob)` returns a `blob:` URL that `fetch` (with `GET`) can read until `revokeObjectURL` is called. Such URLs are understood by `fetch` only, not by `<Image>` or other elements.
+`URL.createObjectURL(blob)` returns a `blob:` URL of the blob's bytes that stays valid until `revokeObjectURL` is called. Everything that reads bytes from a URL reads it: `fetch` (with `GET`), an image's `src` and `placeholder`, `Image.getSize` and `Image.prefetch`, a canvas's `drawImage`, and `Clipboard.writeImage`. The bytes are kept once, in the engine, and never copied into a `data:` URI. A revoked URL loads nothing: an image's `src` shows its placeholder (or nothing), `fetch` rejects.
 
 ## Text encoding
 

@@ -204,7 +204,7 @@ events! {
     ContentSizeChange = "onContentSizeChange": "The size of an input's text changed (payload: `width`, `height`; raised by the core).",
     BackRequest = "onBackRequest" as "onBackPress": "The user pressed back on a screen (the header's back button, Android back, the desktops' back keys and mouse button, the browser's back), whether or not `popOnBack` let it pop.",
     NativeEvent = "onNativeEvent": "A registered native component emitted an event (payload: [`EventPayload::Native`]).",
-    Clipboard = "onClipboard": "A clipboard read finished (root only; payload: `id`, `has`: whether it holds what was asked; for text `text`, unless only `has` was asked; for an image `uri` (a `data:` URI), `width` and `height`, unless only `has` was asked; for files `files`, their `file:` URLs one per line).",
+    Clipboard = "onClipboard": "A clipboard read finished (root only; payload: `id`, `has`: whether it holds what was asked; for text `text`, unless only `has` was asked; for an image `uri` (a `blob:` URL), `width` and `height`, unless only `has` was asked; for files `files`, their `file:` URLs one per line).",
     KeyCommand = "onKeyCommand": "A key matched a binding of `nsh/keymap` (root only; payload: the binding's id, [`crate::keymap::KeyBinding::id`]).",
     Menu = "onMenu": "A menu item was chosen: the application menu's or a context menu's (root only; desktops; payload: `id`), or a context menu closed (`closed`: true, after its item).",
     HoverIn = "onHoverIn": "The mouse came over the view or a view inside it (never on touches).",
@@ -552,7 +552,8 @@ pub enum ResizeMode {
 /// An image source.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageSource {
-    /// `https://…`, `asset:/path` (bundled file) or a file path.
+    /// `https://…`, `asset:/path` (bundled file), a file path, a `data:`
+    /// URI or a `blob:` URL (in the engine's store).
     pub uri: Arc<str>,
     /// Natural size in points, when known up front (bundled assets): used
     /// as the intrinsic layout size.
@@ -1195,7 +1196,7 @@ pub enum Command {
     ImageInfo {
         /// The request.
         id: u32,
-        /// URL or `asset:/` URI.
+        /// URL, `asset:/` URI, `data:` URI or `blob:` URL.
         uri: String,
     },
     /// Move the screen reader's focus to this view.
@@ -1219,13 +1220,14 @@ pub enum Command {
         /// Only whether it holds text (`Clipboard.hasText`).
         has_only: bool,
     },
-    /// Put the image of a `data:` URI on the system clipboard, replacing
-    /// what it holds (on the root; `Clipboard.writeImage`).
+    /// Put the image of `uri` (a `blob:` URL, or a base64 `data:` URL) on
+    /// the system clipboard, replacing what it holds (on the root;
+    /// `Clipboard.writeImage`).
     SetClipboardImage(String),
     /// Read the image on the system clipboard and report it as
     /// [`EventKind::Clipboard`] `id` (on the root): `has` and, unless
-    /// `has_only`, the image as a `data:` URI (`uri`) and its size in
-    /// pixels (`width`, `height`).
+    /// `has_only`, the image as a `blob:` URL (`uri`, its bytes in the
+    /// engine's store) and its size in pixels (`width`, `height`).
     ReadClipboardImage {
         /// The request.
         id: u32,
@@ -1431,7 +1433,8 @@ pub enum Prop {
     /// prop's Rust type ([`crate::ui::PropSpec::decode`]); `None` resets it
     /// to its default.
     RustProp(&'static str, Option<crate::ui::AnyValue>),
-    /// `src`: a URL, `asset:/path`, or an imported asset.
+    /// `src`: a URL, `asset:/path`, an imported asset, a `data:` URI or a
+    /// `blob:` URL.
     #[prop(js = "src", on = IMAGE, shared)]
     Source(Option<ImageSource>),
     /// `resizeMode`: how an image (or a video) fits its box.

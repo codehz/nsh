@@ -55,6 +55,8 @@ import logo from "./assets/logo.png";
 | 资源 | Rust `asset!("logo.png")`，TSX `import logo from "./logo.png"` | 一个 `ImageAsset` `{ url, size, scales? }`，以点为单位：`@2x` 文件按像素的一半计算。当 `logo.png` 旁边有 `logo@2x.png` / `logo@3x.png` 时，会加载适合屏幕像素比的变体（[像素密度](../docs/images-and-assets.md#像素密度)）。可以导入 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 和 `.heic`，以及按 `width` 和 `height` 或 `viewBox` 确定尺寸的 `.svg`（[SVG 图片](../docs/images-and-assets.md#svg-图片)）。 |
 | URL | `"https://example.com/a.jpg"` | 下载并缓存。同一 URL 的下载在多个视图之间共享。 |
 | 资源路径 | `"asset:/images/a.png"` | 应用资源中的文件。 |
+| `blob:` URL | `URL.createObjectURL(blob)`、`Clipboard.readImage().url` | 应用生成或读到的字节，保存在引擎中，直到该 URL 被撤销：不论多大都不转成 `data:` URI。 |
+| `data:` URL | `"data:image/png;base64,…"` | URI 本身携带的字节。 |
 
 开发期间资源由开发服务器提供；`nsh build` 和 `nsh package` 会把它们拷贝进应用（Rust crate 用 `registry.assets(assets!())` 发布它的 `assets/` 目录）。参见[图片与资源](../docs/images-and-assets.md)。
 

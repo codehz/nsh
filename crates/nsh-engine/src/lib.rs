@@ -588,6 +588,15 @@ pub trait MountSink: Send + 'static {
     fn load_chunk(&self, _id: &str) -> bool {
         false
     }
+
+    /// The store `blob:` URLs resolve in: the engine creates
+    /// `URL.createObjectURL` blobs in it and the platform loads `blob:`
+    /// images and canvases from it. Called once before the app starts.
+    /// `None` (the default): a store private to the engine (the platform
+    /// cannot load `blob:` URLs).
+    fn blobs(&self) -> Option<nsh_core::blob::BlobStore> {
+        None
+    }
 }
 
 /// Receives what happens to a request started by [`Network::fetch`], in
@@ -1266,6 +1275,10 @@ impl<M: TextEngine + 'static> Driver<M> {
             App::Rust(_) => Policy::default().access(),
         });
         let mut core = Core::new(text_engine.clone(), config.viewport);
+        // One store of `blob:` URLs for the VM, the core and the platform
+        // (which loads images and canvases from it).
+        let blobs = sink.blobs().unwrap_or_default();
+        core.set_blobs(blobs.clone());
         core.set_components(nsh_core::ui::Registry::merged(&config.ui_sets));
         // The JS calls Rust posts queue in one place, which the core
         // releases in order with the ops (a post during a synchronous call)
@@ -1397,6 +1410,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                             .as_ref()
                             .map(|root| root.join(app_dir_name(config.app.app_id()))),
                         paths: bundle_system_paths(bundle),
+                        blobs: blobs.clone(),
                         wake: Arc::new(move || {
                             let _ = system_tx.send(Message::Wake);
                         }),

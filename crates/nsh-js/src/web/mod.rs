@@ -225,7 +225,9 @@ pub(crate) struct Web {
     ctors: Vec<V>,
     /// The intrinsic `Promise.prototype.then`.
     then: V,
-    pub(crate) blob_urls: blob::BlobUrls,
+    /// The engine's `blob:` URLs ([`crate::HostOptions`] `blobs`): shared
+    /// with the core and the platform, which load them.
+    pub(crate) blobs: nsh_core::blob::BlobStore,
     /// Functions that are one per context (the strategies' `size`).
     cached: Vec<V>,
     /// The requests in flight.
@@ -246,7 +248,7 @@ impl Web {
         self.protos.clear();
         self.ctors.clear();
         self.then = V::undefined();
-        self.blob_urls = Default::default();
+        self.blobs = Default::default();
         self.cached.clear();
         self.fetches.clear();
         self.date = V::undefined();

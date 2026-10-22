@@ -290,11 +290,12 @@ const IMAGE_TYPES: [(&str, &str); 3] = [
     ("image/gif", "com.compuserve.gif"),
 ];
 
-/// `Clipboard.writeImage`: the image of a `data:` URI on the general
-/// pasteboard, under its own type.
-pub(crate) fn set_clipboard_image(uri: &str) {
-    let Some((mime, bytes)) = clipboard::decode_data_uri(uri) else {
-        log::warn!("Clipboard.writeImage: not a base64 data: URI");
+/// `Clipboard.writeImage`: the image of a `blob:` URL (in the engine's
+/// store) or a base64 `data:` URI on the general pasteboard, under its own
+/// type.
+pub(crate) fn set_clipboard_image(blobs: &nsh_core::blob::BlobStore, uri: &str) {
+    let Some((mime, bytes)) = clipboard::image_bytes(blobs, uri) else {
+        log::warn!("Clipboard.writeImage: `{uri}` names no image");
         return;
     };
     let kind = match IMAGE_TYPES.iter().find(|(m, _)| *m == mime) {
@@ -311,12 +312,16 @@ pub(crate) fn set_clipboard_image(uri: &str) {
 
 /// `Clipboard.readImage` / `hasImage`: the answer to read `id`. `hasImages`
 /// does not read the pasteboard, so it shows no paste notice.
-pub(crate) fn read_clipboard_image(id: u32, has_only: bool) -> EventPayload {
+pub(crate) fn read_clipboard_image(
+    blobs: &nsh_core::blob::BlobStore,
+    id: u32,
+    has_only: bool,
+) -> EventPayload {
     let board = objc2_ui_kit::UIPasteboard::generalPasteboard();
     // SAFETY: a plain getter.
     let has = unsafe { board.hasImages() };
     if has_only || !has {
-        return clipboard::image_answer(id, has, None);
+        return clipboard::image_answer(blobs, id, has, None);
     }
     let data = IMAGE_TYPES
         .iter()
@@ -324,7 +329,7 @@ pub(crate) fn read_clipboard_image(id: u32, has_only: bool) -> EventPayload {
         // SAFETY: a plain getter.
         .or_else(|| unsafe { board.image() }.and_then(|image| image.png_representation()));
     let bytes = data.map(|d| d.to_vec()).unwrap_or_default();
-    clipboard::image_answer(id, true, clipboard::Image::sniff(&bytes))
+    clipboard::image_answer(blobs, id, true, clipboard::Image::sniff(&bytes))
 }
 
 /// `Clipboard.readFiles`: the `file:` URLs on the general pasteboard

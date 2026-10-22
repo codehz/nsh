@@ -695,6 +695,39 @@ fn blobs_files_and_form_data() {
 }
 
 #[test]
+fn blob_urls_live_in_the_engine_store() {
+    let store = nsh_core::blob::BlobStore::default();
+    let host = Host::with_options(nsh_js::HostOptions {
+        blobs: store.clone(),
+        ..Default::default()
+    })
+    .unwrap();
+    let out = run_async(
+        &host,
+        r#"
+        const url = URL.createObjectURL(new Blob(["héllo"], { type: "text/x" }));
+        globalThis.url = url;
+        return (await (await fetch(url)).text());
+        "#,
+    );
+    assert_eq!(out, r#""héllo""#);
+    host.eval_source(&(REPORT.to_owned() + "report(globalThis.url);"))
+        .unwrap();
+    let url = output(&host);
+    let hex = url.strip_prefix("blob:nsh://app/").expect("a blob URL");
+    assert_eq!(hex.len(), 32);
+    assert!(hex.chars().all(|c| c.is_ascii_hexdigit()));
+    let entry = store.get(&url).expect("the store holds it");
+    assert_eq!(
+        (&entry.bytes[..], entry.mime.as_str()),
+        (&b"h\xc3\xa9llo"[..], "text/x")
+    );
+    host.eval_source("URL.revokeObjectURL(globalThis.url)")
+        .unwrap();
+    assert!(!store.has(&url), "revoked");
+}
+
+#[test]
 fn queuing_strategies_size_chunks() {
     let host = Host::new().unwrap();
     let out = run(

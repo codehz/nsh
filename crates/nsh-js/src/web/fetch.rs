@@ -1495,7 +1495,7 @@ fn start_fetch(cx: Ctx, input: Raw, init: Raw) -> R<V> {
                 return js::rejected(cx, network_error(cx, "no such blob").raw());
             };
             let mime = b.mime.clone();
-            let r = local_response(cx, &url, b.bytes().to_vec(), &mime)?;
+            let r = local_response(cx, &url, b.bytes.to_vec(), &mime)?;
             return js::resolved(cx, r.raw());
         }
         "http" | "https" => {}

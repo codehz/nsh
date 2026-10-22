@@ -381,7 +381,10 @@ pub(super) struct ClipboardAnswer {
 }
 
 impl ClipboardAnswer {
-    pub(super) fn from_payload(payload: &EventPayload) -> ClipboardAnswer {
+    pub(super) fn from_payload(
+        payload: &EventPayload,
+        blobs: &crate::blob::BlobStore,
+    ) -> ClipboardAnswer {
         let mut answer = ClipboardAnswer::default();
         let EventPayload::Map(entries) = payload else {
             return answer;
@@ -404,10 +407,28 @@ impl ClipboardAnswer {
                 _ => {}
             }
         }
-        // Only an image NSH can show, a `data:` URI, and only one the VM
-        // can hold (the web's player encodes its own).
+        // Only an image NSH can show and the VM can hold: a `blob:` URL of
+        // this engine's store (the platforms' answers), or a `data:` URI an
+        // app passed on (the web's player encodes its own). A blob over the
+        // limit is freed, as its bytes would only be held for nothing.
+        let limit = crate::platform::clipboard::MAX_IMAGE_BYTES;
         answer.image = uri
-            .filter(|u| u.starts_with("data:") && crate::platform::clipboard::uri_within_limit(u))
+            .filter(|url| {
+                if url.starts_with("data:") {
+                    return crate::platform::clipboard::uri_within_limit(url);
+                }
+                if !url.starts_with("blob:") {
+                    return false;
+                }
+                match blobs.get(url) {
+                    Some(entry) if entry.bytes.len() <= limit => true,
+                    Some(_) => {
+                        blobs.remove(url);
+                        false
+                    }
+                    None => false,
+                }
+            })
             .map(|url| crate::ui::ClipboardImage {
                 url,
                 size: crate::geometry::Size::new(pixels(width), pixels(height)),
@@ -4408,6 +4429,11 @@ impl<M: TextEngine> Core<M> {
                     command,
                 });
             }
+            Action::BlobBytes(url, answer) => {
+                answer
+                    .borrow_mut()
+                    .deliver(self.blobs.get(&url).map(|b| b.bytes.to_vec()));
+            }
         }
     }
 
@@ -4609,7 +4635,7 @@ impl<M: TextEngine> Core<M> {
                 let Some(request) = number("id") else {
                     return false;
                 };
-                let answer = ClipboardAnswer::from_payload(payload);
+                let answer = ClipboardAnswer::from_payload(payload, &self.blobs);
                 self.answer_clipboard(request as u32, answer);
                 true
             }

@@ -76,3 +76,12 @@
   patterns count each time they are drawn) is refused with an `svg::Error`. A panic in usvg or resvg is an
   `svg::Error` too (`catch_unwind`): the decoders run in GCD blocks and JNI functions, where an unwinding panic aborts.
   Android's decode threads also catch `OutOfMemoryError`, so a load that runs out of memory fails instead of hanging.
+
+- **`blob:` URLs**: `URL.createObjectURL` puts a blob's bytes and MIME type in the engine's
+  `nsh_core::blob::BlobStore` (the one the `MountSink` hands the engine: `MountSink::blobs`), and the URL names them
+  until revoked; the core keeps the same store (`Core::set_blobs`), so `ui::ambient::blob_bytes` and the clipboard
+  read it too. No platform copies the bytes into a mount item or a `data:` URI: each backend's image loader resolves a
+  `blob:` source from the store at load time (`Location::Blob` on the desktops and GPUI, `Source::Blob` on iOS, Java's
+  `Images.BlobReader` over `Native.readBlob` on Android, browser blob URLs made by `web/nsh.js` on the web), keyed by
+  the URL, so the caches, decoding and `ImageInfo` path are unchanged. A revoked URL resolves to nothing and the load
+  fails as an unsupported source. The store is per surface and reset in `Surface::stop`: a replaced app's bytes go.

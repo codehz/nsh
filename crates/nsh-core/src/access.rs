@@ -1079,9 +1079,13 @@ impl Access {
     }
 
     /// Whether a media URL (image, video, canvas image) may be loaded.
-    /// Relative and `asset:` URIs are the app's own files.
+    /// Relative, `asset:`, `data:` and `blob:` URIs are the app's own bytes.
     pub fn allows_media(&self, uri: &str) -> bool {
-        if !uri.contains("://") || uri.starts_with("asset:") || uri.starts_with("data:") {
+        if !uri.contains("://")
+            || uri.starts_with("asset:")
+            || uri.starts_with("data:")
+            || uri.starts_with("blob:")
+        {
             return true;
         }
         self.allows_http("GET", uri)
@@ -1625,6 +1629,8 @@ mod tests {
         assert!(!access.allows_media("https://example.com/a.png"));
         assert!(access.allows_media("asset:/logo.png"));
         assert!(access.allows_media("logo.png"));
+        assert!(access.allows_media("blob:nsh://app/1"));
+        assert!(access.allows_media("data:image/png;base64,AA=="));
         assert!(!access.allows_webview("https://example.com/"));
         assert!(!access.allows_status_bar());
         assert!(!access.allows_clipboard());

@@ -174,3 +174,10 @@ pub(crate) fn frame() -> (Answer<Instant>, Action) {
     let (answer, slot): (_, AnswerSlot<Instant>) = Answer::new();
     (answer, Action::Frame(slot))
 }
+
+/// The bytes of the `blob:` URL `url` (`None` when it is not one, or was
+/// revoked).
+pub(crate) fn blob_bytes(url: String) -> (Answer<Option<Vec<u8>>>, Action) {
+    let (answer, slot) = Answer::new();
+    (answer, Action::BlobBytes(url, slot))
+}

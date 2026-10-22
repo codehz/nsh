@@ -11,6 +11,7 @@ pub(crate) struct SystemConfig {
     pub(crate) filesystem: Option<std::sync::Arc<dyn nsh_core::filesystem::FileSystem>>,
     pub(crate) data_dir: Option<std::path::PathBuf>,
     pub(crate) paths: nsh_core::access::TrustedPaths,
+    pub(crate) blobs: nsh_core::blob::BlobStore,
     pub(crate) wake: std::sync::Arc<dyn Fn() + Send + Sync>,
 }
 
@@ -81,6 +82,7 @@ mod imp {
                 ui_sets: ui_sets.to_vec(),
                 posts,
                 base_url: bundle.base_url.as_deref().map(str::to_owned),
+                blobs: system.blobs.clone(),
             };
             let mut host = match Host::with_options(options) {
                 Ok(host) => host,

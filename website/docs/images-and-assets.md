@@ -133,6 +133,15 @@ image(move || user.with(|u| u.avatar_url.clone()))
 - Decoded images are cached in memory (the cache is purged under memory pressure), keyed by URL, decode size and blur radius.
 - When the app declares [capabilities](./sandbox-and-capabilities.md), the image's host must be allowed under `network`; a refused image fails with its error event.
 
+## Blob URLs
+
+A source may be a `blob:` URL: the bytes `URL.createObjectURL(blob)` stored in the engine, a clipboard image's `url`
+([`Clipboard.readImage`](../modules/nsh-clipboard.md#clipboardreadimage)), or one an app made. The platform reads them
+from the engine's store, so a picture needs no `data:` URI — no base64 step and no second copy, whatever its size.
+`src` and `placeholder`, `Image.getSize` and `Image.prefetch`, a canvas's `drawImage` and `Clipboard.writeImage` all
+take them, and `fetch` reads their bytes too. A revoked URL loads nothing. They are not assets: nothing is packaged,
+and they end with the app.
+
 ## Resize modes
 
 The resize mode (`.resize_mode(..)` in Rust, `resizeMode` in TSX) decides how an image fills a box of a different shape:

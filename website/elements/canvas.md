@@ -161,7 +161,7 @@ Animated.timing(angle, { toValue: Math.PI * 2, duration: 1000 }).start();
 paths (`moveTo`, `lineTo`, `arc`, `arcTo`, `ellipse`, `rect`, `roundRect`, Bézier curves), `fill` / `stroke` / `clip`
 (also of a `Path2D`, which accepts SVG path data; `fill_svg` / `stroke_svg` in Rust), rectangles, text (`fillText`,
 `strokeText`, `measureText`), linear / radial / conic gradients, line dashes, shadows, `globalAlpha`,
-`globalCompositeOperation` and `drawImage` (images by URL or asset). Every member is listed in the
+`globalCompositeOperation` and `drawImage` (images by URL, asset or `blob:` URL). Every member is listed in the
 [Canvas API reference](../modules/nsh-canvas.md); the [canvas guide](../docs/canvas.md) walks through drawing
 charts and animated graphics.
 

@@ -69,6 +69,11 @@ final class Images {
         byte[] read(String uri);
     }
 
+    /** Reads the engine's `blob:` URLs: the bytes `URL.createObjectURL` stored. */
+    interface BlobReader {
+        byte[] read(String uri);
+    }
+
     /** Checks a redirect against the app's capabilities: the URL to go on to, or null. */
     interface Redirects {
         String next(String base, String location);
@@ -105,6 +110,7 @@ final class Images {
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final AssetReader assets;
+    private final BlobReader blobs;
     /** Decodes waiting for their bytes, or decoding, by cache key. */
     private final HashMap<String, Inflight> inflight = new HashMap<>();
     /** Downloads (or reads), one per URI. */
@@ -128,8 +134,9 @@ final class Images {
         Future<?> task;
     }
 
-    Images(AssetReader assets) {
+    Images(AssetReader assets, BlobReader blobs) {
         this.assets = assets;
+        this.blobs = blobs;
     }
 
     static String key(String uri, int maxPx, int blurPx) {
@@ -370,6 +377,11 @@ final class Images {
 
     /** Reads `uri` (off the UI thread), reporting download progress. */
     private byte[] read(String uri, Download download) throws Exception {
+        if (uri.startsWith("blob:")) {
+            byte[] bytes = blobs.read(uri);
+            if (bytes == null) throw new java.io.FileNotFoundException(uri);
+            return bytes;
+        }
         if (uri.startsWith("asset:/")) {
             byte[] bytes = assets.read(uri);
             if (bytes == null) throw new java.io.FileNotFoundException(uri);

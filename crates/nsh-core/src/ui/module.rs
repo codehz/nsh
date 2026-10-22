@@ -351,8 +351,8 @@ impl ModuleCx {
             .push(super::services::set_clipboard(text.into()));
     }
 
-    /// Puts the image of a `data:` URI on the system clipboard (TS:
-    /// `Clipboard.writeImage`).
+    /// Puts the image of `uri` (a `blob:` URL, or a base64 `data:` URL) on
+    /// the system clipboard (TS: `Clipboard.writeImage`).
     pub fn set_clipboard_image(&mut self, uri: impl Into<String>) {
         self.actions
             .push(super::services::set_clipboard_image(uri.into()));

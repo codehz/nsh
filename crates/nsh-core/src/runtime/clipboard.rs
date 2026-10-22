@@ -28,17 +28,18 @@ impl Clipboard {
         crate::ui::prelude::clipboard_has_string().await
     }
 
-    /// Puts the image of `src`, a `data:` URL (as `readImage` gives), on
-    /// the clipboard, replacing what it holds.
+    /// Puts the image of `src` (a `blob:` URL, as `readImage` gives, or a
+    /// base64 `data:` URL) on the clipboard, replacing what it holds.
+    /// Nothing is put for a URL that names no live blob.
     pub(crate) async fn write_image(src: String) {
         crate::ui::prelude::set_clipboard_image(src);
     }
 
     /// The clipboard's image, `null` when it holds none: `url` is a
-    /// `data:` URL an `Image` shows and `fetch(url)` reads the bytes of,
-    /// `size` its size in pixels; `null` too for an image
-    /// over 48 MB (encoded), which the app's memory may not hold. On iOS,
-    /// reading it may show the system's paste notice.
+    /// `blob:` URL in the engine's store (an `Image` shows it and
+    /// `fetch(url)` reads the bytes of), `size` its size in pixels; `null`
+    /// too for an image over 48 MB, which the app's memory may not hold. On
+    /// iOS, reading it may show the system's paste notice.
     pub(crate) async fn read_image() -> Option<ClipboardImage> {
         crate::ui::prelude::clipboard_image().await
     }

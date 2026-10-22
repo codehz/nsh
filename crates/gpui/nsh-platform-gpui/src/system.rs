@@ -926,7 +926,10 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 }
             });
         }
-        Command::SetClipboardImage(uri) => set_clipboard_image(uri),
+        Command::SetClipboardImage(uri) => {
+            let blobs = surface.blobs.borrow().clone();
+            set_clipboard_image(&blobs, uri);
+        }
         Command::ReadClipboardImage { id, has_only } => {
             read_clipboard_image(surface.key(), *id, *has_only)
         }
@@ -985,14 +988,15 @@ fn clipboard_answer(id: u32, has: bool, text: Option<String>) -> EventPayload {
     EventPayload::Map(fields)
 }
 
-/// `Clipboard.writeImage`: the image of a `data:` URI on GPUI's clipboard,
-/// in its own format when GPUI knows it.
-fn set_clipboard_image(uri: &str) {
-    let Some((mime, bytes)) = clipboard::decode_data_uri(uri) else {
-        log::warn!("Clipboard.writeImage: not a base64 data: URI");
+/// `Clipboard.writeImage`: the image of a `blob:` URL (in the engine's
+/// store) or a base64 `data:` URI on GPUI's clipboard, in its own format
+/// when GPUI knows it.
+fn set_clipboard_image(blobs: &nsh_core::blob::BlobStore, uri: &str) {
+    let Some((mime, bytes)) = clipboard::image_bytes(blobs, uri) else {
+        log::warn!("Clipboard.writeImage: `{uri}` names no image");
         return;
     };
-    let Some(format) = gpui::ImageFormat::from_mime_type(mime) else {
+    let Some(format) = gpui::ImageFormat::from_mime_type(&mime) else {
         log::warn!("Clipboard.writeImage: unsupported image type {mime}");
         return;
     };
@@ -1005,6 +1009,9 @@ fn set_clipboard_image(uri: &str) {
 /// converted to PNG on a worker thread, so every image source shows them.
 fn read_clipboard_image(key: u64, id: u32, has_only: bool) {
     crate::rt::on_app(move |cx| {
+        let blobs = Surface::by_key(key)
+            .map(|s| s.blobs.borrow().clone())
+            .unwrap_or_default();
         let image = cx
             .read_from_clipboard()
             .into_iter()
@@ -1020,7 +1027,7 @@ fn read_clipboard_image(key: u64, id: u32, has_only: bool) {
         };
         let image = match image {
             Some(image) if !has_only => image,
-            other => return answer(clipboard::image_answer(id, other.is_some(), None)),
+            other => return answer(clipboard::image_answer(&blobs, id, other.is_some(), None)),
         };
         std::thread::spawn(move || {
             let png = match clipboard::Image::sniff(&image.bytes) {
@@ -1028,7 +1035,7 @@ fn read_clipboard_image(key: u64, id: u32, has_only: bool) {
                 None => to_png(&image.bytes),
             };
             let bytes = png.as_deref().unwrap_or(&image.bytes);
-            let payload = clipboard::image_answer(id, true, clipboard::Image::sniff(bytes));
+            let payload = clipboard::image_answer(&blobs, id, true, clipboard::Image::sniff(bytes));
             crate::rt::invoke(move || answer(payload));
         });
     });

@@ -7148,7 +7148,9 @@ mod components {
 
     #[test]
     fn components_read_images_and_files_from_the_clipboard() {
+        let store = crate::blob::BlobStore::default();
         let mut c = core();
+        c.set_blobs(store.clone());
         c.mount_root(&crate::ui::Root::new::<ImagePaster>(|| ()));
         let batch = c.commit().unwrap();
         let button = batch
@@ -7190,12 +7192,15 @@ mod components {
             ]
         );
         use crate::PayloadValue::{Bool, Number, Str};
+        // A platform's answer: the image's bytes are in the engine's store,
+        // under a `blob:` URL.
+        let url = store.put(vec![0x89, b'P', b'N', b'G'], "image/png");
         let answers = [
             vec![("id", Number(1.0)), ("has", Bool(true))],
             vec![
                 ("id", Number(2.0)),
                 ("has", Bool(true)),
-                ("uri", Str("data:image/png;base64,AA==".into())),
+                ("uri", Str(url.clone())),
                 ("width", Number(4.0)),
                 ("height", Number(3.0)),
             ],
@@ -7211,8 +7216,83 @@ mod components {
         let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("pasted t")));
         assert_eq!(
             shown.last().unwrap(),
-            "pasted true Some(\"4x3 data:image/png;base64,AA==\") file:///tmp/a%20b.png,file:///tmp/c/"
+            &format!("pasted true Some(\"4x3 {url}\") file:///tmp/a%20b.png,file:///tmp/c/")
         );
+    }
+
+    /// A clipboard image whose bytes do not fit the limit is left out, and
+    /// its blob freed.
+    #[test]
+    fn clipboard_images_over_the_limit_are_dropped() {
+        let store = crate::blob::BlobStore::default();
+        let over = store.put(
+            vec![0; crate::platform::clipboard::MAX_IMAGE_BYTES + 1],
+            "image/png",
+        );
+        let payload = EventPayload::Map(vec![
+            ("id", crate::PayloadValue::Number(1.0)),
+            ("has", crate::PayloadValue::Bool(true)),
+            ("uri", crate::PayloadValue::Str(over.clone())),
+        ]);
+        let answer = crate::core::components::ClipboardAnswer::from_payload(&payload, &store);
+        assert!(answer.has);
+        assert!(answer.image.is_none());
+        assert!(!store.has(&over), "the bytes are freed");
+    }
+
+    /// Reads the bytes of `props.url` when pressed.
+    #[component]
+    fn BlobReader(props: BlobReaderProps) -> impl IntoElement {
+        let read = signal(String::new());
+        view()
+            .child(text(move || format!("bytes {}", read.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let url = props.url.get().to_string();
+                spawn(async move {
+                    let bytes = blob_bytes(url).await;
+                    read.set(match bytes {
+                        Some(bytes) => format!("{:?}", &bytes[..]),
+                        None => "none".to_owned(),
+                    });
+                });
+            }))
+    }
+
+    #[derive(Clone, PartialEq, Props)]
+    struct BlobReaderProps {
+        #[prop(default)]
+        url: crate::ui::Prop<SharedString>,
+    }
+
+    #[test]
+    fn blob_bytes_read_the_engines_store() {
+        let store = crate::blob::BlobStore::default();
+        let url = store.put(vec![1, 2, 3], "image/png");
+        let mut c = core();
+        c.set_blobs(store.clone());
+        let props = url.clone();
+        c.mount_root(&crate::ui::Root::new::<BlobReader>(move || {
+            BlobReaderProps {
+                url: props.clone().into(),
+            }
+        }));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("bytes [")));
+        assert_eq!(shown.last().unwrap(), "bytes [1, 2, 3]");
+        // Revoked: nothing.
+        store.remove(&url);
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t == "bytes none"));
+        assert_eq!(shown.last().unwrap(), "bytes none");
     }
 
     #[test]

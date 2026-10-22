@@ -48,6 +48,8 @@ struct MainThreadSink {
     mounter: SharedMounter,
     on_error: SharedErrorHandler,
     on_hot_failed: SharedHandler,
+    /// The surface's `blob:` URLs.
+    blobs: nsh_core::blob::BlobStore,
     #[cfg(feature = "dev")]
     test_model: TestModel,
 }
@@ -75,6 +77,10 @@ impl MountSink for MainThreadSink {
                 mounter.request_frame();
             }
         });
+    }
+
+    fn blobs(&self) -> Option<nsh_core::blob::BlobStore> {
+        Some(self.blobs.clone())
     }
 
     fn hot_update_failed(&self) {
@@ -127,6 +133,9 @@ pub(crate) struct RootViewIvars {
     host: Cell<nsh_engine::HostEnvironment>,
     /// Keyboard notification registrations.
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
+    /// The app's `blob:` URLs: the engine's store, which images, canvases
+    /// and clipboard images load from. Reset when the app stops.
+    blobs: RefCell<nsh_core::blob::BlobStore>,
     #[cfg(feature = "dev")]
     test_model: TestModel,
 }
@@ -195,6 +204,7 @@ impl RootView {
             environment: Cell::new(None),
             host: Cell::default(),
             observers: RefCell::new(Vec::new()),
+            blobs: RefCell::default(),
             #[cfg(feature = "dev")]
             test_model: TestModel::default(),
         });
@@ -442,10 +452,12 @@ impl RootView {
         {
             model.set_up_engine(&mut config);
         }
+        let blobs = self.ivars().blobs.borrow().clone();
         let sink = MainThreadSink {
             mounter: mounter.clone(),
             on_error: self.ivars().on_error.clone(),
             on_hot_failed: self.ivars().on_hot_failed.clone(),
+            blobs: blobs.clone(),
             #[cfg(feature = "dev")]
             test_model: self.ivars().test_model.clone(),
         };
@@ -473,6 +485,7 @@ impl RootView {
             engine.control(),
             mounter.clone(),
             asset_base,
+            blobs.clone(),
             access,
             self.ivars().options.components.clone(),
         ));
@@ -491,6 +504,8 @@ impl RootView {
         for view in self.subviews() {
             view.removeFromSuperview();
         }
+        // The app's blobs go with it (the store is shared with the VM).
+        *self.ivars().blobs.borrow_mut() = nsh_core::blob::BlobStore::default();
     }
 }
 

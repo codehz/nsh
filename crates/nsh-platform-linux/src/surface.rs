@@ -46,6 +46,8 @@ struct Sink {
     tx: Sender<Message>,
     /// A wake-up is on its way: no need for another.
     pending: Arc<AtomicBool>,
+    /// The surface's `blob:` URLs ([`Surface::blobs`]).
+    blobs: nsh_core::blob::BlobStore,
 }
 
 impl Sink {
@@ -78,6 +80,10 @@ impl MountSink for Sink {
 
     fn hot_update_failed(&self) {
         self.send(Message::HotUpdateFailed);
+    }
+
+    fn blobs(&self) -> Option<nsh_core::blob::BlobStore> {
+        Some(self.blobs.clone())
     }
 }
 
@@ -132,6 +138,9 @@ pub(crate) struct Surface {
     /// Selections across the texts of selection areas
     /// ([`crate::selection_area`]).
     pub(crate) selection: crate::selection_area::State,
+    /// The app's `blob:` URLs: the engine's store, which images, canvases
+    /// and clipboard images load from. Reset when the app stops.
+    pub(crate) blobs: RefCell<nsh_core::blob::BlobStore>,
 }
 
 impl Surface {
@@ -168,6 +177,7 @@ impl Surface {
             keymap: Default::default(),
             chrome: Default::default(),
             selection: Default::default(),
+            blobs: RefCell::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         let weak = Rc::downgrade(&surface);
@@ -233,6 +243,7 @@ impl Surface {
             key: self.key,
             tx,
             pending: pending.clone(),
+            blobs: self.blobs.borrow().clone(),
         };
         *self.rx.borrow_mut() = Some(rx);
         *self.pending.borrow_mut() = pending;
@@ -266,6 +277,8 @@ impl Surface {
         crate::selection_area::reset(self);
         crate::keymap::clear(self);
         self.js_frame.set(false);
+        // The app's blobs go with it (the store is shared with the VM).
+        *self.blobs.borrow_mut() = nsh_core::blob::BlobStore::default();
     }
 
     /// Calls `f` with the engine's control, if an app runs.

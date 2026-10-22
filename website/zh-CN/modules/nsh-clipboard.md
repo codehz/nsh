@@ -29,7 +29,7 @@ const Clipboard: {
 };
 
 interface ClipboardImage {
-  url: string; // data:image/png;base64,…
+  url: string; // blob:nsh://app/…
   size: { width: number; height: number }; // 像素
 }
 ```
@@ -133,10 +133,9 @@ Clipboard.hasText().then((has) => canPaste.set(has));
 readImage(): Promise<ClipboardImage | null>;
 ```
 
-返回剪贴板上的图片，没有时为 `null`：粘贴的截图，或在浏览器、图片编辑器里复制的图片。Rust：`clipboard_image()`，没有时为 `None`。`url` 是图片的 `data:` URL（PNG，或剪贴板自带的 JPEG、GIF、WebP、BMP），可直接作为 [`Image`](../elements/image.md) 的 `src`；在 TSX 中用 `fetch(url)` 拿到它的字节用于上传，在 Rust 中解码逗号之后的 base64 即得到字节。`size`（`width` 和 `height`）是像素尺寸。和 `readText` 一样，在用户要求粘贴时再读。可读取的图片最大 48 MB（编码后），这样 `data:` URL 能放进应用的内存；更大的图片 `readImage` 返回 `null`，`hasImage` 返回 `true`。
+返回剪贴板上的图片，没有时为 `null`：粘贴的截图，或在浏览器、图片编辑器里复制的图片。Rust：`clipboard_image()`，没有时为 `None`。`url` 是图片的 `blob:` URL（PNG，或剪贴板自带的 JPEG、GIF、WebP、BMP），可直接作为 [`Image`](../elements/image.md) 的 `src`；在 TSX 中用 `fetch(url)` 拿到它的字节用于上传，在 Rust 中用 `blob_bytes(url.clone()).await`。字节保存在引擎的存储中、由该 URL 指向：不做 base64 编码，也不会在 VM 堆里多留一份。`size`（`width` 和 `height`）是像素尺寸。和 `readText` 一样，在用户要求粘贴时再读。可读取的图片最大 48 MB；更大的图片 `readImage` 返回 `null`，`hasImage` 返回 `true`。该 URL 一直有效，直到应用用 `URL.revokeObjectURL` 撤销它，或被新的应用替换。
 
 ```rust tabs
-use base64::Engine as _;
 use nsh_core::ui::{ClipboardImage, prelude::*};
 
 fn attachments() -> impl IntoElement {
@@ -160,10 +159,9 @@ fn attachments() -> impl IntoElement {
 }
 
 async fn upload(image: &ClipboardImage) -> Result<HttpResponse, String> {
-    let (_, data) = image.url.split_once(',').ok_or("not a data: URL")?;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(data)
-        .map_err(|e| e.to_string())?;
+    let bytes = blob_bytes(image.url.clone())
+        .await
+        .ok_or("该图片的 blob 已被撤销")?;
     let request = HttpRequest::post("https://example.com/upload", bytes).header("Content-Type", "image/png");
     fetch(request).await
 }
@@ -232,7 +230,7 @@ hasImage(): Promise<boolean>;
 writeImage(src: string): Promise<void>;
 ```
 
-把 `src`（base64 `data:` URL，例如 `readImage` 给的）的图片放到剪贴板上，替换原有内容。Rust：`set_clipboard_image(src)`。Windows 上接受 PNG，这是浏览器、Office 和截图工具读取的格式。
+把 `src` 指定的图片放到剪贴板上，替换原有内容：`src` 是 `blob:` URL（例如 `readImage` 给的，或 `URL.createObjectURL` 生成的），也可以是 base64 `data:` URL。Rust：`set_clipboard_image(src)`。Windows 上接受 PNG，这是浏览器、Office 和截图工具读取的格式。
 
 ```rust tabs
 set_clipboard_image(image.url.clone());

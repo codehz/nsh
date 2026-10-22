@@ -1,5 +1,6 @@
-//! Image views: loading (`asset:/`, files, HTTP, `data:`), decoding into
-//! textures, drawing with the resize mode, tint, blur and placeholder.
+//! Image views: loading (`asset:/`, files, HTTP, `data:`, `blob:`),
+//! decoding into textures, drawing with the resize mode, tint, blur and
+//! placeholder.
 //!
 //! Loads run on a small pool of worker threads: read the file or download
 //! (ureq; `onProgress` at most every 100ms), decode (GDK's own PNG / JPEG /
@@ -106,6 +107,8 @@ enum Location {
     File(PathBuf),
     /// A `data:` URI (decoded on the worker).
     Data(String),
+    /// A `blob:` URL: the engine's stored bytes.
+    Blob(nsh_core::blob::BlobEntry),
 }
 
 impl Location {
@@ -116,6 +119,7 @@ impl Location {
             Location::Url(url) => url.clone(),
             Location::File(path) => format!("file://{}", path.display()),
             Location::Data(uri) => uri.clone(),
+            Location::Blob(entry) => entry.url.clone(),
         }
     }
 }
@@ -145,6 +149,19 @@ fn resolve(uri: &str, base: Option<&AssetBase>) -> Option<Location> {
             .map(|(path, _)| Location::File(path));
     }
     uri.starts_with('/').then(|| Location::File(uri.into()))
+}
+
+/// Resolves `uri` for a load: a `blob:` URL names bytes in `blobs`,
+/// anything else resolves as [`resolve`] does.
+fn location(
+    uri: &str,
+    base: Option<&AssetBase>,
+    blobs: &nsh_core::blob::BlobStore,
+) -> Option<Location> {
+    if uri.starts_with("blob:") {
+        return blobs.get(uri).map(Location::Blob);
+    }
+    resolve(uri, base)
 }
 
 /// The bytes of a `data:` URI (base64 or percent-encoded).
@@ -232,6 +249,7 @@ fn read(
     match location {
         Location::File(path) => std::fs::read(path).map_err(|e| format!("{}: {e}", path.display())),
         Location::Data(uri) => data_uri(uri),
+        Location::Blob(entry) => Ok(entry.bytes.to_vec()),
         Location::Url(url) => {
             let mut response = get(url, access)?;
             let total = response.body().content_length().unwrap_or(0);
@@ -618,7 +636,9 @@ fn finish(key: String, result: Result<Picture, String>) {
 /// Loads `uri` for `surface`; `done` runs on the main thread. Returns
 /// whether it already ran (cached, or a source that cannot load).
 fn fetch(surface: &Surface, uri: &str, progress: Option<Progress>, done: Done) -> bool {
-    let Some(location) = resolve(uri, surface.asset_base.borrow().as_ref()) else {
+    let base = surface.asset_base.borrow().clone();
+    let blobs = surface.blobs.borrow().clone();
+    let Some(location) = location(uri, base.as_ref(), &blobs) else {
         done(Err(format!("unsupported image source `{uri}`")));
         return true;
     };
@@ -645,7 +665,8 @@ fn fetch(surface: &Surface, uri: &str, progress: Option<Progress>, done: Done) -
     false
 }
 
-/// Loads the bitmap `uri` (`https://…`, `asset:/…`, a file path, `data:`)
+/// Loads the bitmap `uri` (`https://…`, `asset:/…`, a file path, `data:`,
+/// `blob:`)
 /// for a canvas off the main thread, through the texture cache; `done` runs
 /// on the main thread with the image (an animation's first frame).
 /// Canvases draw bitmaps: an SVG is an image that failed to load.
@@ -673,7 +694,9 @@ pub(crate) fn load_bitmap(
 /// draw without waiting).
 #[allow(dead_code)]
 pub(crate) fn cached(surface: &Surface, uri: &str) -> Option<gdk::Texture> {
-    let key = resolve(uri, surface.asset_base.borrow().as_ref())?.key();
+    let base = surface.asset_base.borrow().clone();
+    let blobs = surface.blobs.borrow().clone();
+    let key = location(uri, base.as_ref(), &blobs)?.key();
     LOADER.with(|l| l.cached(&key)).map(|p| p.texture)
 }
 
@@ -1270,6 +1293,21 @@ mod tests {
             resolve("data:image/png;base64,AA==", None),
             Some(Location::Data(_))
         ));
+    }
+
+    #[test]
+    fn blob_urls_resolve_from_the_store() {
+        let store = nsh_core::blob::BlobStore::default();
+        let url = store.put(vec![1, 2, 3], "image/png");
+        let found = location(&url, None, &store).expect("the blob");
+        assert_eq!(found, Location::Blob(store.get(&url).unwrap()));
+        assert_eq!(found.key(), url);
+        assert_eq!(
+            read(&found, &Access::default(), &mut |_, _| {}).unwrap(),
+            vec![1, 2, 3]
+        );
+        store.remove(&url);
+        assert_eq!(location(&url, None, &store), None);
     }
 
     #[test]

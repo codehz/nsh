@@ -1,6 +1,6 @@
-//! `<Image>`: loading (`asset:/`, files, HTTP, `data:`), decoding with
-//! ImageIO off the main thread, and showing the result in an image sublayer
-//! of the view ([`crate::decor`]).
+//! `<Image>`: loading (`asset:/`, files, HTTP, `data:`, `blob:`), decoding
+//! with ImageIO off the main thread, and showing the result in an image
+//! sublayer of the view ([`crate::decor`]).
 //!
 //! Bytes are fetched once per location (NSURLSession downloads report
 //! `onProgress` at most every 100ms; files and `data:` URIs are read on a
@@ -110,6 +110,8 @@ impl nsh_engine::Assets for AssetReader {
                     .map_err(|e| format!("{url}: {}", e.localizedDescription()))
             }
             Some(Location::Data(data)) => data_uri(&data),
+            // Fonts never come from blob URLs.
+            Some(Location::Blob(entry)) => Err(format!("{} is not an asset", entry.url)),
             None => Err(format!("{uri}: no asset location configured")),
         }
     }
@@ -129,6 +131,8 @@ enum Location {
     File(PathBuf),
     /// A `data:` URI (decoded off the main thread).
     Data(String),
+    /// A `blob:` URL: the engine's stored bytes.
+    Blob(nsh_core::blob::BlobEntry),
 }
 
 impl Location {
@@ -138,6 +142,7 @@ impl Location {
             Location::Url(url) => url.clone(),
             Location::File(path) => format!("file://{}", path.display()),
             Location::Data(uri) => uri.clone(),
+            Location::Blob(entry) => entry.url.clone(),
         }
     }
 }
@@ -166,6 +171,19 @@ fn resolve(uri: &str, base: Option<&AssetBase>) -> Option<Location> {
         return path.starts_with('/').then(|| Location::File(path.into()));
     }
     uri.starts_with('/').then(|| Location::File(uri.into()))
+}
+
+/// Resolves `uri` for a load: a `blob:` URL names bytes in `blobs`,
+/// anything else resolves as [`resolve`] does.
+fn location(
+    uri: &str,
+    base: Option<&AssetBase>,
+    blobs: &nsh_core::blob::BlobStore,
+) -> Option<Location> {
+    if uri.starts_with("blob:") {
+        return blobs.get(uri).map(Location::Blob);
+    }
+    resolve(uri, base)
 }
 
 /// `%xx` escapes decoded (invalid ones kept as they are).
@@ -521,6 +539,10 @@ fn fetch(location: Location, want: Want) {
         }),
         Location::Data(uri) => in_background(move || {
             let result = data_uri(&uri).map(Arc::new);
+            on_main(move || bytes_ready(&lk, result));
+        }),
+        Location::Blob(entry) => in_background(move || {
+            let result = Ok(Arc::new(entry.bytes.to_vec()));
             on_main(move || bytes_ready(&lk, result));
         }),
         Location::Url(url) => match ns_url(&url) {
@@ -964,7 +986,9 @@ pub(crate) fn load(
     uri: &str,
     done: impl FnOnce(Result<CFRetained<CGImage>, String>) + 'static,
 ) {
-    match resolve(uri, surface.asset_base.borrow().as_ref()) {
+    let base = surface.asset_base.borrow().clone();
+    let blobs = surface.blobs.borrow().clone();
+    match location(uri, base.as_ref(), &blobs) {
         Some(location) => {
             let uri = uri.to_owned();
             let done = move |r: Result<Decoded, String>| done(r.and_then(|d| bitmap(&uri, d)));
@@ -987,7 +1011,9 @@ fn bitmap(uri: &str, image: Decoded) -> Result<CFRetained<CGImage>, String> {
 /// The image of `uri` at its natural size, if it is cached.
 #[allow(dead_code)]
 pub(crate) fn cached(surface: &Surface, uri: &str) -> Option<Decoded> {
-    let location = resolve(uri, surface.asset_base.borrow().as_ref())?.key();
+    let base = surface.asset_base.borrow().clone();
+    let blobs = surface.blobs.borrow().clone();
+    let location = location(uri, base.as_ref(), &blobs)?.key();
     with(|l| l.cached(&Decoding::default().key(&location)))
 }
 
@@ -1017,7 +1043,9 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             EventPayload::Map(fields),
         );
     };
-    match resolve(uri, surface.asset_base.borrow().as_ref()) {
+    let base = surface.asset_base.borrow().clone();
+    let blobs = surface.blobs.borrow().clone();
+    match location(uri, base.as_ref(), &blobs) {
         Some(location) => fetch(location, Want::Info(Box::new(done))),
         None => done(Err(format!("unsupported image source `{uri}`"))),
     }
@@ -1169,6 +1197,7 @@ fn start(surface: &Rc<Surface>, view: &NshView) {
     };
     let weak = Weak::from_retained(&Retained::from(&**view as &ViewObj));
     let base = surface.asset_base.borrow().clone();
+    let blobs = surface.blobs.borrow().clone();
     if let Some(source) = source {
         let progress = events.contains(EventKind::Progress).then(|| {
             let surface = Rc::downgrade(surface);
@@ -1208,7 +1237,7 @@ fn start(surface: &Rc<Surface>, view: &NshView) {
                 }
             }
         };
-        let immediate = match resolve(&source.uri, base.as_ref()) {
+        let immediate = match location(&source.uri, base.as_ref(), &blobs) {
             Some(location) => request(location, decoding, progress, Box::new(done)),
             None => {
                 done(Err(format!("unsupported image source `{}`", source.uri)));
@@ -1225,7 +1254,7 @@ fn start(surface: &Rc<Surface>, view: &NshView) {
     let Some(placeholder) = placeholder.filter(|_| !shown) else {
         return;
     };
-    let Some(location) = resolve(&placeholder.uri, base.as_ref()) else {
+    let Some(location) = location(&placeholder.uri, base.as_ref(), &blobs) else {
         log::warn!("unsupported image placeholder `{}`", placeholder.uri);
         return;
     };
@@ -1370,6 +1399,21 @@ mod tests {
             Some(Location::File("/home/a b.png".into()))
         );
         assert_eq!(resolve("relative.png", None), None);
+    }
+
+    #[test]
+    fn blob_urls_resolve_from_the_store() {
+        let store = nsh_core::blob::BlobStore::default();
+        let url = store.put(vec![1, 2, 3], "image/png");
+        let found = location(&url, None, &store).expect("the blob");
+        assert_eq!(found, Location::Blob(store.get(&url).unwrap()));
+        assert_eq!(found.key(), url);
+        let Location::Blob(entry) = found else {
+            panic!()
+        };
+        assert_eq!(&entry.bytes[..], &[1, 2, 3]);
+        store.remove(&url);
+        assert_eq!(location(&url, None, &store), None);
     }
 
     #[test]

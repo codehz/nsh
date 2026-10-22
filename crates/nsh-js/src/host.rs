@@ -186,6 +186,12 @@ pub struct HostOptions {
     /// resolve against: the page's on the web. `None` (native hosts):
     /// they are invalid, as there is no document they belong to.
     pub base_url: Option<String>,
+    /// The engine's `blob:` URLs: `URL.createObjectURL` stores blobs here
+    /// and `fetch`, images, canvases and `Clipboard.writeImage` read them
+    /// from it. The engine hands its VM the store its `MountSink` gives it
+    /// (`MountSink::blobs`), so the platform loads the same bytes; the
+    /// default (a store of its own) keeps them reachable from the VM only.
+    pub blobs: nsh_core::blob::BlobStore,
 }
 
 impl Host {
@@ -230,6 +236,7 @@ impl Host {
                 .base_url
                 .as_deref()
                 .and_then(|u| url::Url::parse(u).ok());
+            web::web(cx.as_raw().as_ptr()).blobs = options.blobs;
             install(&cx, &shared)?;
             crate::standard::install(&cx)?;
             // Before hardening freezes the globals.

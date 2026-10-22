@@ -384,7 +384,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 .setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString });
         }
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
-        Command::SetClipboardImage(uri) => set_clipboard_image(uri),
+        Command::SetClipboardImage(uri) => set_clipboard_image(surface, uri),
         Command::ReadClipboardImage { id, has_only } => {
             read_clipboard_image(surface, *id, *has_only)
         }
@@ -809,12 +809,13 @@ const IMAGE_TYPES: [(&str, &str); 6] = [
     ("image/tiff", "public.tiff"),
 ];
 
-/// `Clipboard.writeImage`: the image of a `data:` URI on the pasteboard,
-/// under its own type (and TIFF too, which every AppKit app reads, unless
-/// it is TIFF already).
-fn set_clipboard_image(uri: &str) {
-    let Some((mime, bytes)) = clipboard::decode_data_uri(uri) else {
-        log::warn!("Clipboard.writeImage: not a base64 data: URI");
+/// `Clipboard.writeImage`: the image of a `blob:` URL (in the engine's
+/// store) or a base64 `data:` URI on the pasteboard, under its own type
+/// (and TIFF too, which every AppKit app reads, unless it is TIFF already).
+fn set_clipboard_image(surface: &Surface, uri: &str) {
+    let blobs = surface.blobs.borrow().clone();
+    let Some((mime, bytes)) = clipboard::image_bytes(&blobs, uri) else {
+        log::warn!("Clipboard.writeImage: `{uri}` names no image");
         return;
     };
     let Some((_, kind)) = IMAGE_TYPES.iter().find(|(m, _)| *m == mime) else {
@@ -837,6 +838,7 @@ fn set_clipboard_image(uri: &str) {
 /// pasteboard's first image of [`IMAGE_TYPES`]; a TIFF becomes PNG (an
 /// image source of any platform), off the main thread.
 fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
+    let blobs = surface.blobs.borrow().clone();
     let pasteboard = NSPasteboard::generalPasteboard();
     // The types on offer: reading them is no paste (no privacy notice).
     let kind = pasteboard.types().and_then(|types| {
@@ -850,7 +852,7 @@ fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
         .filter(|_| !has_only)
         .and_then(|kind| pasteboard.dataForType(kind));
     let Some(data) = data else {
-        let payload = clipboard::image_answer(id, kind.is_some(), None);
+        let payload = clipboard::image_answer(&blobs, id, kind.is_some(), None);
         surface.event(ROOT_ID, EventKind::Clipboard, payload);
         return;
     };
@@ -866,7 +868,7 @@ fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
             .then(|| to_png(&bytes))
             .flatten();
         let bytes = png.as_deref().unwrap_or(&bytes);
-        let payload = clipboard::image_answer(id, true, clipboard::Image::sniff(bytes));
+        let payload = clipboard::image_answer(&blobs, id, true, clipboard::Image::sniff(bytes));
         DispatchQueue::main().exec_async(move || {
             if let Some(surface) = Surface::with_key(key) {
                 surface.event(ROOT_ID, EventKind::Clipboard, payload);

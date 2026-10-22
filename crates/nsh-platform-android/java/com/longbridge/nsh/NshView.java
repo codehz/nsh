@@ -95,7 +95,7 @@ public class NshView extends FrameLayout {
         super(context);
         density = getResources().getDisplayMetrics().density;
         TextLayouts.cacheDir = context.getCacheDir();
-        mounter = new Mounter(this, new Images(this::readAsset));
+        mounter = new Mounter(this, new Images(this::readAsset, this::readBlob));
         root = mounter.root;
         addView(root, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         touches = new TouchTracker(mounter, this);
@@ -587,6 +587,11 @@ public class NshView extends FrameLayout {
         main.post(() -> {
             if (errorListener != null) errorListener.onError(message);
         });
+    }
+
+    /** Bytes of a `blob:` URL from the engine's store, or null. Blocking: image threads. */
+    byte[] readBlob(String uri) {
+        return handle == 0 ? null : Native.readBlob(handle, uri);
     }
 
     /** Bytes of an `asset:/…` URI, or null. Blocking: engine and image threads. */

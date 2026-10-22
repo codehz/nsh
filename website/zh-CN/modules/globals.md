@@ -222,7 +222,9 @@ class URL {
   constructor(url: string | URL, base?: string | URL);
   static canParse(url: string | URL, base?: string | URL): boolean;
   static parse(url: string | URL, base?: string | URL): URL | null;
-  /** A `blob:` URL `fetch` reads `blob` from, until revoked. */
+  /** `blob` 的 `blob:` URL，在撤销之前有效：`fetch`（GET）可以读取，图片的
+   * `src` 与 `placeholder`、`Image.getSize`、`Image.prefetch`、canvas 的
+   * `drawImage` 和 `Clipboard.writeImage` 也可以。 */
   static createObjectURL(blob: Blob): string;
   static revokeObjectURL(url: string): void;
   href: string;
@@ -277,7 +279,7 @@ url.href; // "https://api.example.com/v1/items?page=2&tag=new"
 
 `URLSearchParams`（以及 `Headers`、`FormData`）的迭代器遍历的是创建迭代器那一刻的快照，并且带有迭代器辅助方法（`map`、`filter`、`toArray` 等）。
 
-`URL.createObjectURL(blob)` 返回一个 `blob:` URL，在调用 `revokeObjectURL` 之前都可以用 `fetch`（`GET`）读取。只有 `fetch` 认识这种 URL，`<Image>` 等元素不认识。
+`URL.createObjectURL(blob)` 返回指向该 blob 字节的 `blob:` URL，直到调用 `revokeObjectURL` 为止一直有效。所有从 URL 读取字节的地方都认识它：`fetch`（`GET`）、图片的 `src` 与 `placeholder`、`Image.getSize` 与 `Image.prefetch`、canvas 的 `drawImage`，以及 `Clipboard.writeImage`。字节在引擎中只保留一份，不会复制成 `data:` URI。撤销后的 URL 什么也读不到：图片的 `src` 显示占位图（或不显示），`fetch` reject。
 
 ## 文本编码
 

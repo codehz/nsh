@@ -2,20 +2,22 @@
 //! [`EventKind::Clipboard`](crate::EventKind::Clipboard) payloads for images and files
 //! ([`Command::ReadClipboardImage`](crate::Command::ReadClipboardImage),
 //! [`Command::ReadClipboardFiles`](crate::Command::ReadClipboardFiles)), and
-//! the `data:` and `file:` URIs they carry, so every backend writes them
-//! the same way.
+//! the `blob:` and `file:` URIs they carry, so every backend writes them
+//! the same way: an image's bytes stay in the engine's
+//! [`BlobStore`](crate::blob::BlobStore), which its URL names.
 
 use crate::{EventPayload, PayloadValue};
 
-/// The largest image a clipboard read gives, in encoded bytes (48 MiB).
-/// Its `data:` URI (a third larger) becomes a JS string the VM's heap holds
-/// (256 MB for an embedded app), with whatever the app makes of it, such as
-/// a `Blob`; running out of heap stops the VM, so a larger image reads as
-/// none (`has` stays true).
+/// The largest image a clipboard read gives, in bytes (48 MiB). Its bytes
+/// stay in the engine's [`BlobStore`](crate::blob::BlobStore), which the
+/// answer's `blob:` URL names: no base64 form, no `data:` copy and no
+/// second copy in the VM's heap. A larger image reads as none (`has` stays
+/// true).
 pub const MAX_IMAGE_BYTES: usize = 48 << 20;
 
-/// Whether `uri`, a clipboard image's `data:` URI, is within
-/// [`MAX_IMAGE_BYTES`] (the core checks what every backend answers).
+/// Whether `uri`, a clipboard image's `data:` URI (an app's older form),
+/// is within [`MAX_IMAGE_BYTES`] (the core checks what every backend
+/// answers).
 pub(crate) fn uri_within_limit(uri: &str) -> bool {
     // `data:image/…;base64,` and the base64 of the bytes.
     uri.len() <= 64 + MAX_IMAGE_BYTES.div_ceil(3) * 4
@@ -51,9 +53,14 @@ impl<'a> Image<'a> {
 
 /// The answer to image read `id`: whether the clipboard holds an image and,
 /// unless only that was asked (`image` is `None` then), the image as a
-/// `data:` URI and its size. An image over [`MAX_IMAGE_BYTES`] is left
-/// out (and logged), unencoded.
-pub fn image_answer(id: u32, has: bool, image: Option<Image<'_>>) -> EventPayload {
+/// `blob:` URL in `blobs` and its size. An image over
+/// [`MAX_IMAGE_BYTES`] is left out (and logged), unstored.
+pub fn image_answer(
+    blobs: &crate::blob::BlobStore,
+    id: u32,
+    has: bool,
+    image: Option<Image<'_>>,
+) -> EventPayload {
     let mut fields = vec![
         ("id", PayloadValue::Number(id as f64)),
         ("has", PayloadValue::Bool(has || image.is_some())),
@@ -73,11 +80,22 @@ pub fn image_answer(id: u32, has: bool, image: Option<Image<'_>>) -> EventPayloa
         fits
     });
     if let Some(image) = image {
-        fields.push(("uri", PayloadValue::Str(data_uri(image.mime, image.bytes))));
+        let url = blobs.put(image.bytes.to_vec(), image.mime.to_owned());
+        fields.push(("uri", PayloadValue::Str(url)));
         fields.push(("width", PayloadValue::Number(image.width as f64)));
         fields.push(("height", PayloadValue::Number(image.height as f64)));
     }
     EventPayload::Map(fields)
+}
+
+/// The type and bytes of `uri`: a `blob:` URL in `blobs`, or a base64
+/// `data:` URI (the form `Clipboard.writeImage` took first). `None` when it
+/// is neither, or names no live blob.
+pub fn image_bytes(blobs: &crate::blob::BlobStore, uri: &str) -> Option<(String, Vec<u8>)> {
+    if let Some(entry) = blobs.get(uri) {
+        return Some((entry.mime.clone(), entry.bytes.to_vec()));
+    }
+    decode_data_uri(uri).map(|(mime, bytes)| (mime.to_owned(), bytes))
 }
 
 /// The answer to files read `id`: the files' `file:` URLs (see
@@ -307,21 +325,23 @@ mod tests {
 
     #[test]
     fn images_over_the_limit_read_as_none() {
+        let blobs = crate::blob::BlobStore::default();
         let mut bytes = PNG.to_vec();
         bytes.resize(MAX_IMAGE_BYTES + 1, 0);
         let image = Image::sniff(&bytes).unwrap();
         assert_eq!(
-            image_answer(1, true, Some(image)),
+            image_answer(&blobs, 1, true, Some(image)),
             EventPayload::Map(vec![
                 ("id", PayloadValue::Number(1.0)),
                 ("has", PayloadValue::Bool(true)),
             ])
         );
+        assert!(!blobs.has("blob:nsh://app/0"));
         bytes.truncate(MAX_IMAGE_BYTES);
-        let EventPayload::Map(fields) = image_answer(1, true, Image::sniff(&bytes)) else {
+        let EventPayload::Map(fields) = image_answer(&blobs, 1, true, Image::sniff(&bytes)) else {
             panic!()
         };
-        assert!(matches!(&fields[2], ("uri", PayloadValue::Str(u)) if uri_within_limit(u)));
+        assert!(matches!(&fields[2], ("uri", PayloadValue::Str(u)) if blobs.has(u)));
         assert!(!uri_within_limit(&data_uri(
             "image/png",
             &vec![0; MAX_IMAGE_BYTES + 64]
@@ -330,15 +350,20 @@ mod tests {
 
     #[test]
     fn answers_carry_images_and_files() {
+        let blobs = crate::blob::BlobStore::default();
         let image = Image::sniff(PNG).unwrap();
-        let EventPayload::Map(fields) = image_answer(4, true, Some(image)) else {
+        let EventPayload::Map(fields) = image_answer(&blobs, 4, true, Some(image)) else {
             panic!()
         };
         assert_eq!(fields[0], ("id", PayloadValue::Number(4.0)));
         assert_eq!(fields[1], ("has", PayloadValue::Bool(true)));
-        assert!(
-            matches!(&fields[2], ("uri", PayloadValue::Str(u)) if u.starts_with("data:image/png;base64,") && uri_within_limit(u))
-        );
+        let uri = match &fields[2] {
+            ("uri", PayloadValue::Str(u)) => u,
+            other => panic!("{other:?}"),
+        };
+        assert!(uri.starts_with("blob:"), "{uri}");
+        let entry = blobs.get(uri).expect("the answer's blob");
+        assert_eq!((&entry.bytes[..], entry.mime.as_str()), (PNG, "image/png"));
         assert_eq!(
             fields[3..],
             [
@@ -354,5 +379,19 @@ mod tests {
                 ("files", PayloadValue::Str("file:///a\nfile:///b/".into())),
             ])
         );
+    }
+
+    #[test]
+    fn image_bytes_read_blobs_and_data_uris() {
+        let blobs = crate::blob::BlobStore::default();
+        let url = blobs.put(PNG.to_vec(), "image/png");
+        let (mime, bytes) = image_bytes(&blobs, &url).expect("the blob");
+        assert_eq!((mime.as_str(), &bytes[..]), ("image/png", PNG));
+        let uri = data_uri("image/jpeg", PNG);
+        let (mime, bytes) = image_bytes(&blobs, &uri).expect("the data URI");
+        assert_eq!((mime.as_str(), &bytes[..]), ("image/jpeg", PNG));
+        blobs.remove(&url);
+        assert!(image_bytes(&blobs, &url).is_none());
+        assert!(image_bytes(&blobs, "https://example.com/a.png").is_none());
     }
 }

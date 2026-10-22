@@ -105,6 +105,9 @@ pub(crate) enum Action {
     /// Measures the node with the layout of the commit the action goes out
     /// with; the measurement resolves the slot.
     Measure(NodeId, AnswerSlot<Option<crate::Measurement>>),
+    /// The bytes of a `blob:` URL resolve the slot (`None` when it is not
+    /// one, or was revoked).
+    BlobBytes(String, AnswerSlot<Option<Vec<u8>>>),
 }
 
 /// A clipboard read waiting for the platform's answer.
@@ -124,8 +127,10 @@ pub(crate) enum ClipboardRead {
 /// An image read from the system clipboard (`Clipboard.readImage`).
 #[derive(Debug, Clone, Default, PartialEq, super::JsObject)]
 pub struct ClipboardImage {
-    /// The image as a `data:` URL (`data:image/png;base64,…`): an image's
-    /// `src`, and `fetch(url)` gives its bytes.
+    /// Its bytes' `blob:` URL in the engine's store: an image's `src`,
+    /// `fetch(url)`, a canvas's `drawImage`, and
+    /// [`super::ambient::blob_bytes`](crate::ui::ambient::blob_bytes) all
+    /// read it, until the app revokes it with `URL.revokeObjectURL`.
     pub url: String,
     /// Its size in pixels.
     pub size: Size<DevicePixels>,

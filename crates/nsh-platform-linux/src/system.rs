@@ -496,7 +496,7 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             }
         }
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
-        Command::SetClipboardImage(uri) => set_clipboard_image(uri),
+        Command::SetClipboardImage(uri) => set_clipboard_image(surface, uri),
         Command::ReadClipboardImage { id, has_only } => {
             read_clipboard_image(surface, *id, *has_only)
         }
@@ -1080,11 +1080,13 @@ fn read_clipboard(surface: &Rc<Surface>, id: u32, has_only: bool) {
     });
 }
 
-/// `Clipboard.writeImage`: the image of a `data:` URI as a GDK texture,
-/// which GDK offers in the formats it encodes (PNG, TIFF, ...).
-fn set_clipboard_image(uri: &str) {
-    let Some((_, bytes)) = clipboard::decode_data_uri(uri) else {
-        log::warn!("Clipboard.writeImage: not a base64 data: URI");
+/// `Clipboard.writeImage`: the image of a `blob:` URL (in the engine's
+/// store) or a base64 `data:` URI as a GDK texture, which GDK offers in the
+/// formats it encodes (PNG, TIFF, ...).
+fn set_clipboard_image(surface: &Surface, uri: &str) {
+    let blobs = surface.blobs.borrow().clone();
+    let Some((_, bytes)) = clipboard::image_bytes(&blobs, uri) else {
+        log::warn!("Clipboard.writeImage: `{uri}` names no image");
         return;
     };
     match gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)) {
@@ -1103,8 +1105,9 @@ fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
     let answer = move |surface: &Surface, payload| {
         surface.event(ROOT_ID, EventKind::Clipboard, payload);
     };
+    let blobs = surface.blobs.borrow().clone();
     let Some(display) = gdk::Display::default() else {
-        return answer(surface, clipboard::image_answer(id, false, None));
+        return answer(surface, clipboard::image_answer(&blobs, id, false, None));
     };
     let board = display.clipboard();
     let has = board
@@ -1112,7 +1115,7 @@ fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
         .union_deserialize_types()
         .contains_type(gdk::Texture::static_type());
     if has_only || !has {
-        return answer(surface, clipboard::image_answer(id, has, None));
+        return answer(surface, clipboard::image_answer(&blobs, id, has, None));
     }
     let surface = Rc::downgrade(surface);
     glib::spawn_future_local(async move {
@@ -1125,7 +1128,7 @@ fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
         };
         let image = png.as_deref().and_then(clipboard::Image::sniff);
         if let Some(surface) = surface.upgrade() {
-            answer(&surface, clipboard::image_answer(id, true, image));
+            answer(&surface, clipboard::image_answer(&blobs, id, true, image));
         }
     });
 }

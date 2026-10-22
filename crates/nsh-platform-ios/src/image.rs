@@ -1,9 +1,9 @@
-//! Image loading: fetch (NSURLSession, reporting progress, or file) once
-//! per URI, downsample-decode with ImageIO on a background queue at each
-//! requested pixel size, cache decoded images in an `NSCache` (purged under
-//! memory pressure), coalesce concurrent requests and cancel downloads
-//! nobody waits for. `Image.prefetch` / `getSize` keep the bytes they
-//! fetched for the views that show them next.
+//! Image loading: fetch (NSURLSession, reporting progress, or a file, or
+//! the engine's `blob:` store) once per URI, downsample-decode with ImageIO
+//! on a background queue at each requested pixel size, cache decoded images
+//! in an `NSCache` (purged under memory pressure), coalesce concurrent
+//! requests and cancel downloads nobody waits for. `Image.prefetch` /
+//! `getSize` keep the bytes they fetched for the views that show them next.
 //!
 //! SVG images (sniffed from their bytes) are drawn by [`nsh_core::svg`] at
 //! the requested pixel size instead, then blurred, filtered, tinted and
@@ -114,6 +114,8 @@ enum Source {
     File(std::path::PathBuf),
     /// A `data:` URI (base64), decoded off the main thread.
     Data,
+    /// A `blob:` URL: the engine's stored bytes.
+    Blob(nsh_core::blob::BlobEntry),
 }
 
 /// What the loader tells the mounter, on the main thread.
@@ -191,6 +193,8 @@ pub(crate) struct ImageLoader {
     inflight: FxHashMap<String, Inflight>,
     downloads: FxHashMap<String, Download>,
     asset_base: Option<AssetBase>,
+    /// The engine's `blob:` URLs.
+    blobs: nsh_core::blob::BlobStore,
     notify: Notify,
     /// What the app may load, checked at every redirect.
     access: std::sync::Arc<nsh_engine::Access>,
@@ -199,6 +203,7 @@ pub(crate) struct ImageLoader {
 impl ImageLoader {
     pub(crate) fn new(
         asset_base: Option<AssetBase>,
+        blobs: nsh_core::blob::BlobStore,
         notify: Notify,
         access: std::sync::Arc<nsh_engine::Access>,
     ) -> Self {
@@ -217,6 +222,7 @@ impl ImageLoader {
             inflight: FxHashMap::default(),
             downloads: FxHashMap::default(),
             asset_base,
+            blobs,
             notify,
             access,
         }
@@ -323,6 +329,17 @@ impl ImageLoader {
                     let result = std::fs::read(&path)
                         .map(|bytes| NSData::with_bytes(&bytes))
                         .map_err(|e| format!("{}: {e}", path.display()));
+                    on_main(&notify, LoadEvent::Bytes { uri, result });
+                });
+                None
+            }
+            Some(Source::Blob(entry)) => {
+                let uri = uri.to_owned();
+                DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
+                    DispatchQueueGlobalPriority::Default,
+                ))
+                .exec_async(move || {
+                    let result = Ok(NSData::with_bytes(&entry.bytes));
                     on_main(&notify, LoadEvent::Bytes { uri, result });
                 });
                 None
@@ -513,6 +530,9 @@ impl ImageLoader {
     }
 
     fn resolve(&self, uri: &str) -> Option<Source> {
+        if uri.starts_with("blob:") {
+            return self.blobs.get(uri).map(Source::Blob);
+        }
         if let Some(path) = uri.strip_prefix("asset:/") {
             return match self.asset_base.as_ref()? {
                 AssetBase::Http(base) => url(&format!("{base}{path}")).map(Source::Url),

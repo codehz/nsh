@@ -503,6 +503,8 @@ class Player {
     // Views removed by the batch being applied (`finishRemovals`).
     this.removals = [];
     this.images = new Map();
+    // Browser blob URLs of the engine's `blob:` URLs (`asset`).
+    this.blobUrls = new Map();
     this.pointers = new Map();
     this.requests = new Map();
     this.websockets = new Map();
@@ -1023,6 +1025,9 @@ class Player {
   }
 
   stop() {
+    // The app's blobs (and the browser's copies of them) go with it.
+    for (const url of this.blobUrls.values()) URL.revokeObjectURL(url);
+    this.blobUrls.clear();
     this.fileOperations.clear();
     for (const id of [...this.requests.keys()]) this.fetchCancel(id);
     for (const id of [...this.websockets.keys()]) this.websocketCancel(id);
@@ -1227,7 +1232,43 @@ class Player {
       const path = uri.slice("asset:/".length).replace(/^\/+/, "");
       return this.options.assets?.[path] ?? this.assetBase + path;
     }
+    if (uri.startsWith("blob:")) return this.blobUrl(uri);
     return uri;
+  }
+
+  /** The browser blob URL of one of the engine's `blob:` URLs (`""` when it
+   * names no live blob): one per URL, until the app revokes it. */
+  blobUrl(uri) {
+    let url = this.blobUrls.get(uri);
+    if (url) {
+      if (this.blobHas(uri)) return url;
+      URL.revokeObjectURL(url);
+      this.blobUrls.delete(uri);
+      return "";
+    }
+    if (!this.blobHas(uri)) return "";
+    const len = this.withStrings([uri], (p, l) => this.wasm.nsh_blob_bytes(p, l));
+    // A blob may be empty: no bytes to read then.
+    const bytes = len ? this.bytes(this.wasm.nsh_blob_ptr(), len) : new Uint8Array(0);
+    const mimeLen = this.wasm.nsh_blob_mime_len();
+    const type = mimeLen ? this.str(this.wasm.nsh_blob_mime_ptr(), mimeLen) : "";
+    url = URL.createObjectURL(new Blob([bytes], { type }));
+    this.blobUrls.set(uri, url);
+    return url;
+  }
+
+  /** Whether `uri` (a `blob:` URL) names live bytes in the engine's store. */
+  blobHas(uri) {
+    if (typeof this.wasm?.nsh_blob_has !== "function") return false;
+    return this.withStrings([uri], (p, l) => this.wasm.nsh_blob_has(p, l)) !== 0;
+  }
+
+  /** Stores `bytes` of type `type` in the engine's store: its `blob:` URL. */
+  putBlob(bytes, type) {
+    if (typeof this.wasm?.nsh_blob_put !== "function") return "";
+    const len = this.withStrings([bytes, type ?? ""], (bp, bl, tp, tl) =>
+      this.wasm.nsh_blob_put(bp, bl, tp, tl));
+    return len ? this.str(this.wasm.nsh_blob_url_ptr(), len) : "";
   }
 
   // Mounting ------------------------------------------------------------
@@ -2591,6 +2632,8 @@ class Player {
 
   canvasImage(uri, el) {
     const src = this.asset(uri);
+    // A revoked blob has nothing to draw.
+    if (!src) return null;
     let entry = this.images.get(src);
     if (!entry) {
       const img = new Image();
@@ -3460,17 +3503,21 @@ class Player {
     this.event(ROOT_ID, "onClipboard", payload);
   }
 
-  /** `Clipboard.writeImage`: a `data:` URI's image as a clipboard item (browsers take PNG). */
+  /** `Clipboard.writeImage`: the image of a `blob:` URL (in the engine's
+   * store) or a `data:` URI as a clipboard item (browsers take PNG). */
   async writeClipboardImage(uri) {
     try {
-      const blob = await (await fetch(uri)).blob();
+      const src = this.asset(uri);
+      if (!src) return;
+      const blob = await (await fetch(src)).blob();
       await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
     } catch {
       // Denied, an insecure context, or a type the browser does not write.
     }
   }
 
-  /** `Clipboard.readImage` / `hasImage`: the first image item, as a `data:` URI with its size. */
+  /** `Clipboard.readImage` / `hasImage`: the first image item, as a `blob:`
+   * URL (in the engine's store) with its size. */
   async readClipboardImage(request, hasOnly) {
     const app = this.app;
     const answer = (payload) => app === this.app && this.event(ROOT_ID, "onClipboard", { id: request, ...payload });
@@ -3487,17 +3534,13 @@ class Player {
       // Denied, or no clipboard access (an insecure context).
     }
     if (!blob || hasOnly) return answer({ has: !!blob });
-    const uri = await new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
-    if (!uri) return answer({ has: true });
+    const uri = this.putBlob(new Uint8Array(await blob.arrayBuffer()), blob.type);
+    const src = uri ? this.asset(uri) : "";
+    if (!src) return answer({ has: true });
     const img = new Image();
     img.onload = () => answer({ has: true, uri, width: img.naturalWidth, height: img.naturalHeight });
     img.onerror = () => answer({ has: true });
-    img.src = uri;
+    img.src = src;
   }
 
   /** `Image.getSize` / `prefetch`: loads the image (the browser keeps it cached for the views that show it). */
@@ -3508,7 +3551,9 @@ class Player {
     const answer = (payload) => app === this.app && this.event(ROOT_ID, "onImageInfo", { id: request, ...payload });
     img.onload = () => answer({ width: img.naturalWidth, height: img.naturalHeight });
     img.onerror = () => answer({ error: `failed to load ${uri}` });
-    img.src = this.asset(uri);
+    const src = this.asset(uri);
+    if (!src) return answer({ error: `failed to load ${uri}` });
+    img.src = src;
   }
 
   // Network -------------------------------------------------------------

@@ -702,6 +702,8 @@ pub struct Core<M: TextEngine> {
     /// Serves the app's clipboard calls in place of the platform
     /// ([`Core::set_clipboard`]).
     clipboard: Option<Arc<dyn crate::clipboard::ClipboardBackend>>,
+    /// The engine's `blob:` URLs ([`Core::set_blobs`]).
+    blobs: crate::blob::BlobStore,
     /// Rust components and what they rendered.
     components: components::Components,
     /// Overlay nodes, those shown in the order they were shown (the last
@@ -753,6 +755,7 @@ impl<M: TextEngine> Core<M> {
             access: Arc::default(),
             denied: Default::default(),
             clipboard: None,
+            blobs: Default::default(),
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
             roots: Vec::new(),
@@ -908,6 +911,14 @@ impl<M: TextEngine> Core<M> {
     /// platform's clipboard (`None`: the platform's, the default).
     pub fn set_clipboard(&mut self, backend: Option<Arc<dyn crate::clipboard::ClipboardBackend>>) {
         self.clipboard = backend;
+    }
+
+    /// Sets the store `blob:` URLs resolve in: the one
+    /// `URL.createObjectURL` fills and that the platform's image loader
+    /// reads, so an image source, a canvas image and
+    /// [`crate::ui::ambient::blob_bytes`] find the same bytes.
+    pub fn set_blobs(&mut self, blobs: crate::blob::BlobStore) {
+        self.blobs = blobs;
     }
 
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in

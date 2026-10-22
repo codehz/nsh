@@ -14,7 +14,9 @@
 //!   run by run ([`text`]); native animations run here on
 //!   `requestAnimationFrame` ([`animation`]).
 //!
-//! - `fetch` runs on the browser's `fetch` ([`net`]).
+//! - `fetch` runs on the browser's `fetch` ([`net`]); `blob:` URLs (the
+//!   engine's store) become browser blob URLs for images, canvases and the
+//!   clipboard, and clipboard images become `blob:` URLs again.
 //!
 //! There are no native components; web views are `<iframe>`s and scroll
 //! views use the browser's scrolling. Off WebAssembly this crate is empty.
@@ -94,6 +96,15 @@ thread_local! {
     /// What the last [`nsh_compile`] made: the module or the error.
     #[cfg(feature = "compiler")]
     static COMPILED: RefCell<String> = const { RefCell::new(String::new()) };
+    /// The running app's `blob:` URLs: the engine's store, which the page's
+    /// images, canvases and clipboard read through [`nsh_blob_bytes`] (as
+    /// browser blob URLs, made by `nsh.js`).
+    static BLOBS: RefCell<Option<nsh_core::blob::BlobStore>> = const { RefCell::new(None) };
+    /// The blob whose bytes JS is reading ([`nsh_blob_bytes`]): keeps them
+    /// alive, with no copy.
+    static BLOB: RefCell<Option<nsh_core::blob::BlobEntry>> = const { RefCell::new(None) };
+    /// The URL of the blob [`nsh_blob_put`] stored last.
+    static BLOB_URL: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 /// What [`ui_sets!`] gives.
@@ -188,9 +199,15 @@ struct Running {
     environment: Environment,
 }
 
-struct Sink;
+/// Forwards batches to the page, and gives the engine the surface's
+/// `blob:` store.
+struct Sink(nsh_core::blob::BlobStore);
 
 impl MountSink for Sink {
+    fn blobs(&self) -> Option<nsh_core::blob::BlobStore> {
+        Some(self.0.clone())
+    }
+
     fn submit(&self, batch: MountBatch) {
         #[cfg(feature = "dev")]
         TEST_MODEL.with(|m| {
@@ -559,7 +576,10 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         }
     });
     let text = Rc::new(WebTextEngine::default());
-    let Some(mut engine) = LocalEngine::start(config, text.clone(), Sink) else {
+    // One store of `blob:` URLs for the VM, the core and the page.
+    let blobs = nsh_core::blob::BlobStore::default();
+    BLOBS.with(|b| *b.borrow_mut() = Some(blobs.clone()));
+    let Some(mut engine) = LocalEngine::start(config, text.clone(), Sink(blobs)) else {
         return -1.0;
     };
     // A task woken by a browser callback (a WebSocket message in an app's
@@ -919,12 +939,111 @@ pub extern "C" fn nsh_test_answer_ptr() -> *const u8 {
     TEST_ANSWER.with(|a| a.borrow().as_ptr())
 }
 
+/// The length of the bytes a `blob:` URL names, kept for [`nsh_blob_ptr`]
+/// and [`nsh_blob_mime_ptr`] until the next call; 0 when it names none
+/// (and for an empty blob: [`nsh_blob_has`] tells them apart).
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory holding a string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_blob_bytes(ptr: *const u8, len: usize) -> usize {
+    // SAFETY: guaranteed by the caller.
+    let url = unsafe { string(ptr, len) };
+    let entry = BLOBS.with(|b| b.borrow().as_ref().and_then(|store| store.get(&url)));
+    match entry {
+        Some(entry) => {
+            let bytes = entry.bytes.len();
+            BLOB.with(|b| *b.borrow_mut() = Some(entry));
+            bytes
+        }
+        None => {
+            BLOB.with(|b| *b.borrow_mut() = None);
+            0
+        }
+    }
+}
+
+/// Where the bytes [`nsh_blob_bytes`] found start.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_blob_ptr() -> *const u8 {
+    BLOB.with(|b| {
+        b.borrow()
+            .as_ref()
+            .map_or(std::ptr::null(), |e| e.bytes.as_ptr())
+    })
+}
+
+/// Where their MIME type starts (empty when unknown).
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_blob_mime_ptr() -> *const u8 {
+    BLOB.with(|b| {
+        b.borrow()
+            .as_ref()
+            .map_or(std::ptr::null(), |e| e.mime.as_ptr())
+    })
+}
+
+/// The length of the MIME type [`nsh_blob_bytes`] found.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_blob_mime_len() -> usize {
+    BLOB.with(|b| b.borrow().as_ref().map_or(0, |e| e.mime.len()))
+}
+
+/// Whether `url` names a live blob in the engine's store.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory holding a string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_blob_has(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: guaranteed by the caller.
+    let url = unsafe { string(ptr, len) };
+    BLOBS.with(|b| b.borrow().as_ref().is_some_and(|store| store.has(&url))) as u32
+}
+
+/// Stores `bytes` (of type `mime`) as a blob and returns the length of its
+/// URL, kept for [`nsh_blob_url_ptr`]: the URL `ClipboardImage.url` takes
+/// (`readClipboardImage`).
+///
+/// # Safety
+///
+/// `ptr..ptr + len` and `type_ptr..type_ptr + type_len` are memory holding
+/// the bytes and the type.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_blob_put(
+    ptr: *const u8,
+    len: usize,
+    type_ptr: *const u8,
+    type_len: usize,
+) -> usize {
+    // SAFETY: guaranteed by the caller.
+    let bytes = unsafe { bytes(ptr, len) };
+    // SAFETY: guaranteed by the caller.
+    let mime = unsafe { string(type_ptr, type_len) };
+    let Some(store) = BLOBS.with(|b| b.borrow().clone()) else {
+        return 0;
+    };
+    let url = store.put(bytes.to_vec(), mime);
+    let len = url.len();
+    BLOB_URL.with(|u| *u.borrow_mut() = url);
+    len
+}
+
+/// Where the URL of the blob [`nsh_blob_put`] stored starts.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_blob_url_ptr() -> *const u8 {
+    BLOB_URL.with(|u| u.borrow().as_ptr())
+}
+
 /// Stops the app.
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_stop() {
     APP.with(|a| a.borrow_mut().take());
     KEYMAP.with(|k| k.borrow_mut().take());
     BATCHES.with(|b| b.borrow_mut().clear());
+    BLOBS.with(|b| *b.borrow_mut() = None);
+    BLOB.with(|b| *b.borrow_mut() = None);
 }
 
 /// Applies the submitted batches: animation items to the animator, the

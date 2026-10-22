@@ -87,6 +87,8 @@ struct Sink {
     perf: Arc<AtomicBool>,
     /// The directory `import()` chunks load from ([`AppOptions::chunks`]).
     chunks: Option<PathBuf>,
+    /// The surface's `blob:` URLs ([`Surface::blobs`]).
+    blobs: nsh_core::blob::BlobStore,
 }
 
 impl Sink {
@@ -123,6 +125,10 @@ impl MountSink for Sink {
 
     fn resized(&self, size: Size<Points>) {
         self.send(Message::Resized(size));
+    }
+
+    fn blobs(&self) -> Option<nsh_core::blob::BlobStore> {
+        Some(self.blobs.clone())
     }
 
     fn load_chunk(&self, id: &str) -> bool {
@@ -222,6 +228,9 @@ pub(crate) struct Surface {
     /// The app's keyboard shortcuts ([`crate::keymap`]).
     pub(crate) keymap: crate::keymap::KeymapState,
     pub(crate) file_drop: crate::file_drop::State,
+    /// The app's `blob:` URLs: the engine's store, which images, canvases
+    /// and clipboard images load from. Reset when the app stops.
+    pub(crate) blobs: RefCell<nsh_core::blob::BlobStore>,
 }
 
 /// A per-frame callback ([`Surface::add_frame_callback`]): gets the frame
@@ -268,6 +277,7 @@ impl Surface {
             keymap: Default::default(),
             file_drop: Default::default(),
             chrome: Default::default(),
+            blobs: RefCell::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         // CoreText's first use loads fonts and caches (tens of
@@ -309,6 +319,7 @@ impl Surface {
             pending: pending.clone(),
             perf: self.perf_on.clone(),
             chunks: self.chunks.borrow().clone(),
+            blobs: self.blobs.borrow().clone(),
         };
         *self.rx.borrow_mut() = Some(rx);
         *self.pending.borrow_mut() = pending;
@@ -345,6 +356,8 @@ impl Surface {
         self.js_frame.set(false);
         self.resize_late.set(false);
         self.frame_callbacks.borrow_mut().clear();
+        // The app's blobs go with it (the store is shared with the VM).
+        *self.blobs.borrow_mut() = nsh_core::blob::BlobStore::default();
     }
 
     /// Calls `f` with the engine's control, if an app runs.

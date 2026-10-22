@@ -10,6 +10,7 @@
 
 pub mod access;
 pub mod animation;
+pub mod blob;
 pub mod canvas;
 pub mod clipboard;
 pub mod color;

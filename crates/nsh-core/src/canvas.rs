@@ -511,7 +511,8 @@ pub enum CanvasTextBaseline {
 /// What `drawImage` draws: a URL or an imported asset.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CanvasImage {
-    /// URL or `asset:/path`.
+    /// URL, `asset:/path`, a `data:` URI or a `blob:` URL (in the engine's
+    /// store).
     pub uri: Arc<str>,
 }
 

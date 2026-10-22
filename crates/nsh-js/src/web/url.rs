@@ -533,7 +533,9 @@ toString(): string;"#,
             members: r#"constructor(url: string | URL, base?: string | URL);
 static canParse(url: string | URL, base?: string | URL): boolean;
 static parse(url: string | URL, base?: string | URL): URL | null;
-/** A `blob:` URL `fetch` reads `blob` from, until revoked. */
+/** A `blob:` URL of `blob`, until revoked: `fetch` (a GET) reads it, and so
+ * do an image's `src` and `placeholder`, `Image.getSize` /
+ * `Image.prefetch`, a canvas's `drawImage` and `Clipboard.writeImage`. */
 static createObjectURL(blob: Blob): string;
 static revokeObjectURL(url: string): void;
 href: string;

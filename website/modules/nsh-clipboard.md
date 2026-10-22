@@ -29,7 +29,7 @@ const Clipboard: {
 };
 
 interface ClipboardImage {
-  url: string; // data:image/png;base64,…
+  url: string; // blob:nsh://app/…
   size: { width: number; height: number }; // pixels
 }
 ```
@@ -134,14 +134,15 @@ readImage(): Promise<ClipboardImage | null>;
 ```
 
 Resolves with the clipboard's image, or `null` when it holds none: a pasted screenshot, or an image copied in a browser
-or an image editor. Rust: `clipboard_image()`, `None` when it holds none. `url` is a `data:` URL of the image (PNG, or
+or an image editor. Rust: `clipboard_image()`, `None` when it holds none. `url` is a `blob:` URL of the image (PNG, or
 the clipboard's own JPEG, GIF, WebP or BMP), which an [`Image`](../elements/image.md) shows as its `src`; in TSX,
-`fetch(url)` gives its bytes, for an upload, and in Rust the base64 after the comma decodes to them. `size` (`width` and
-`height`) is its size in pixels. As with `readText`, read it when the user asks to paste. Images of up to 48 MB (encoded) are
-read, so the `data:` URL fits in the app's memory; for a larger one `readImage` resolves `null` and `hasImage` `true`.
+`fetch(url)` gives its bytes, for an upload, and in Rust `blob_bytes(url.clone()).await` does. Its bytes stay in the
+engine's store, where the URL names them: nothing is base64-encoded and no second copy is kept in the VM's heap. `size`
+(`width` and `height`) is its size in pixels. As with `readText`, read it when the user asks to paste. Images of up to
+48 MB are read; for a larger one `readImage` resolves `null` and `hasImage` `true`. The URL lives until the app
+revokes it with `URL.revokeObjectURL`, or is replaced.
 
 ```rust tabs
-use base64::Engine as _;
 use nsh_core::ui::{ClipboardImage, prelude::*};
 
 fn attachments() -> impl IntoElement {
@@ -165,10 +166,9 @@ fn attachments() -> impl IntoElement {
 }
 
 async fn upload(image: &ClipboardImage) -> Result<HttpResponse, String> {
-    let (_, data) = image.url.split_once(',').ok_or("not a data: URL")?;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(data)
-        .map_err(|e| e.to_string())?;
+    let bytes = blob_bytes(image.url.clone())
+        .await
+        .ok_or("the image's blob was revoked")?;
     let request = HttpRequest::post("https://example.com/upload", bytes).header("Content-Type", "image/png");
     fetch(request).await
 }
@@ -239,8 +239,9 @@ Resolves with whether the clipboard holds an image, without reading it: no paste
 writeImage(src: string): Promise<void>;
 ```
 
-Puts the image of `src`, a base64 `data:` URL such as `readImage` gives, on the clipboard, replacing what it holds. Rust:
-`set_clipboard_image(src)`. On Windows it takes a PNG, the format browsers, Office and the Snipping Tool read.
+Puts the image of `src` on the clipboard, replacing what it holds: a `blob:` URL (such as `readImage` gives, or one
+`URL.createObjectURL` made) or a base64 `data:` URL. Rust: `set_clipboard_image(src)`. On Windows it takes a PNG, the
+format browsers, Office and the Snipping Tool read.
 
 ```rust tabs
 set_clipboard_image(image.url.clone());
